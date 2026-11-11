@@ -200,16 +200,17 @@
 
   /** Draw a symbol fitted into a small canvas (toolbar icons). */
   SL.drawIcon = function (canvas, kind, color) {
-    var g = canvas.getContext("2d"), dpr = window.devicePixelRatio || 1;
-    var w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
-    canvas.width = w * dpr; canvas.height = h * dpr;
+    var g = canvas.getContext("2d"), dpr = Math.max(2, window.devicePixelRatio || 1);
+    var w = canvas.clientWidth || canvas.width || 32, h = canvas.clientHeight || canvas.height || 32;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
     var sym = SL.buildSymbol(kind, {}), bb = SL.symBBox(sym);
     var sw = Math.max(1, bb[1][0] - bb[0][0]), sh = Math.max(1, bb[1][1] - bb[0][1]);
-    var zoom = Math.min((w - 4) / sw, (h - 4) / sh);
+    var zoom = Math.min((w - 6) / sw, (h - 6) / sh);
     var cx = (bb[0][0] + bb[1][0]) / 2, cy = (bb[0][1] + bb[1][1]) / 2;
     var r = new R(g, { zoom: zoom, panX: w / 2 - cx * zoom, panY: h / 2 - cy * zoom });
-    r.comp({ id: 0, kind: kind, x: 0, y: 0, rot: 0, mirror: false, name: "" }, {}, color || "#000", false, null);
+    r.w = function (lw) { return Math.min(2.2, Math.max(1.35, lw * this.v.zoom * 1.5)); };
+    r.comp({ id: 0, kind: kind, x: 0, y: 0, rot: 0, mirror: false, name: "" }, {}, color || "#1a1a1a", false, null);
   };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);

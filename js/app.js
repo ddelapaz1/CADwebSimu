@@ -451,41 +451,74 @@
 
   // ------------------------------------------------------------------ menus & bars
   var ICONS = {
-    "new": "<path d='M5 2h9l5 5v15H5z'/><path d='M14 2v5h5'/>",
-    open: "<path d='M2 6h7l2 2h11v12H2z'/>",
-    save: "<path d='M4 3h13l3 3v15H4z'/><path d='M7 3v6h9V3M7 21v-7h10v7'/>",
-    print: "<path d='M6 9V3h12v6M6 18H3v-8h18v8h-3M6 14h12v7H6z'/>",
-    cut: "<circle cx='6' cy='18' r='3'/><circle cx='18' cy='18' r='3'/><path d='M8 16L19 3M16 16L5 3'/>",
-    copy: "<rect x='8' y='8' width='12' height='13'/><path d='M16 8V3H4v13h4'/>",
-    paste: "<rect x='5' y='4' width='14' height='17'/><path d='M9 4V2h6v2M8 10h8M8 14h8'/>",
-    zoomin: "<circle cx='10' cy='10' r='6'/><path d='M15 15l6 6M7 10h6M10 7v6'/>",
-    zoomout: "<circle cx='10' cy='10' r='6'/><path d='M15 15l6 6M7 10h6'/>",
-    zoomwin: "<rect x='3' y='3' width='18' height='18' stroke-dasharray='3 2'/><circle cx='12' cy='12' r='3'/>",
-    zoomall: "<path d='M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5'/>",
-    zoomprev: "<circle cx='10' cy='10' r='6'/><path d='M15 15l6 6M7 10h6'/><path d='M3 3l3 3'/>",
-    grid: "<path d='M3 8h18M3 16h18M8 3v18M16 3v18'/>",
-    undo: "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 010 12h-3'/>",
-    redo: "<path d='M15 14l5-5-5-5'/><path d='M20 9H10a6 6 0 000 12h3'/>",
-    rotl: "<path d='M3 12a9 9 0 109-9H7'/><path d='M10 0L7 3l3 3'/>",
-    rotr: "<path d='M21 12a9 9 0 11-9-9h5'/><path d='M14 0l3 3-3 3'/>",
-    mirror: "<path d='M12 2v20M9 5L3 19h6zM15 5l6 14h-6z'/>",
-    play: "<path d='M7 4l13 8-13 8z' fill='#222'/>",
-    stop: "<rect x='5' y='5' width='14' height='14' fill='#222'/>",
-    pause: "<rect x='6' y='4' width='4' height='16' fill='#222'/><rect x='14' y='4' width='4' height='16' fill='#222'/>",
-    step: "<path d='M5 4l10 8-10 8z' fill='#222'/><rect x='17' y='4' width='3' height='16' fill='#222'/>",
-    all: "<path d='M3 4l8 8-8 8zM12 4l8 8-8 8z' fill='#222'/>",
-    info: "<circle cx='12' cy='12' r='9'/><path d='M12 11v6M12 7v.5'/>",
-    select: "<path d='M5 3l12 9-6 1 4 7-2 1-4-7-4 4z' fill='#fff'/>",
-    wire: "<path d='M4 4v12h16'/><circle cx='4' cy='4' r='2' fill='#222'/><circle cx='20' cy='16' r='2' fill='#222'/>",
-    line: "<path d='M4 20L20 4'/>",
-    rect: "<rect x='3' y='6' width='18' height='12'/>",
-    ellipse: "<ellipse cx='12' cy='12' rx='9' ry='6'/>",
-    frect: "<rect x='3' y='6' width='18' height='12' fill='#ffe478'/>",
-    fellipse: "<ellipse cx='12' cy='12' rx='9' ry='6' fill='#ffe478'/>",
-    text: "<path d='M5 20L12 4l7 16M8 14h8'/>",
+    "new": "<path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' fill='#fff'/><path d='M14 2v6h6M12 18v-6M9 15h6'/>",
+    open: "<path d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z' fill='#f6d365'/>",
+    save: "<path d='M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z' fill='#e8f0fe'/><path d='M17 21v-8H7v8' fill='#fff'/><path d='M7 3v5h8'/>",
+    print: "<path d='M6 9V2h12v7' fill='#fff'/><path d='M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2' fill='#dce1e7'/><rect x='6' y='14' width='12' height='8' fill='#fff'/>",
+    cut: "<circle cx='6' cy='6' r='3'/><circle cx='6' cy='18' r='3'/><path d='M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12'/>",
+    copy: "<rect x='9' y='9' width='13' height='13' rx='2' fill='#fff'/><path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/>",
+    paste: "<path d='M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2' fill='#fff'/><rect x='8' y='2' width='8' height='4' rx='1' fill='#dce1e7'/><path d='M9 12h6M9 16h6'/>",
+    zoomin: "<circle cx='11' cy='11' r='7' fill='#e8f4fd'/><path d='M21 21l-4.35-4.35M11 8v6M8 11h6'/>",
+    zoomout: "<circle cx='11' cy='11' r='7' fill='#e8f4fd'/><path d='M21 21l-4.35-4.35M8 11h6'/>",
+    zoomwin: "<rect x='3' y='3' width='18' height='18' rx='2' stroke-dasharray='3 2'/><circle cx='11' cy='11' r='4' fill='#e8f4fd'/><path d='M16 16l-2.2-2.2'/>",
+    zoomall: "<path d='M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7M3 9V3h6M21 15v6h-6'/>",
+    zoomprev: "<circle cx='11' cy='11' r='7' fill='#e8f4fd'/><path d='M21 21l-4.35-4.35M9 11h5M11 9l-2 2 2 2'/>",
+    grid: "<rect x='3' y='3' width='18' height='18' rx='2' fill='#fff'/><path d='M3 9h18M3 15h18M9 3v18M15 3v18' stroke-width='1.3'/>",
+    undo: "<path d='M3 7v6h6'/><path d='M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13'/>",
+    redo: "<path d='M21 7v6h-6'/><path d='M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7'/>",
+    rotl: "<path d='M2.5 2v6h6'/><path d='M2.66 15.57a10 10 0 1 0 .57-8.38L2.5 8'/>",
+    rotr: "<path d='M21.5 2v6h-6'/><path d='M21.34 15.57a10 10 0 1 1-.57-8.38L21.5 8'/>",
+    mirror: "<path d='M12 3v18' stroke-dasharray='2 2'/><path d='M9 6L3 18h6z' fill='#cfe2ff'/><path d='M15 6l6 12h-6z' fill='#fff'/>",
+    play: "<polygon points='6 3 20 12 6 21 6 3' fill='#28a745' stroke='#1e7e34'/>",
+    stop: "<rect x='5' y='5' width='14' height='14' rx='2' fill='#dc3545' stroke='#bd2130'/>",
+    pause: "<rect x='6' y='4' width='4.5' height='16' rx='1' fill='#fd7e14' stroke='#d96200'/><rect x='13.5' y='4' width='4.5' height='16' rx='1' fill='#fd7e14' stroke='#d96200'/>",
+    step: "<polygon points='4 4 14 12 4 20 4 4' fill='#28a745' stroke='#1e7e34'/><rect x='16.5' y='4' width='3.5' height='16' rx='1' fill='#2b6cb0' stroke='#1e4e8c'/>",
+    all: "<polygon points='2 4 11 12 2 20 2 4' fill='#28a745' stroke='#1e7e34'/><polygon points='12 4 21 12 12 20 12 4' fill='#28a745' stroke='#1e7e34'/>",
+    info: "<circle cx='12' cy='12' r='10' fill='#e8f4fd' stroke='#1d6fa5'/><path d='M12 16v-5M12 8h.01' stroke='#1d6fa5' stroke-width='2.2'/>",
+    select: "<path d='M5 3l13 9.5-6 1.2 3.8 6.8-2.4 1.3-3.8-6.8-4.6 3.8z' fill='#fff'/>",
+    wire: "<path d='M4 5v14h16' stroke='#0050c8' stroke-width='2'/><circle cx='4' cy='5' r='2.5' fill='#dc3545' stroke='#900'/><circle cx='20' cy='19' r='2.5' fill='#dc3545' stroke='#900'/>",
+    line: "<path d='M4 20L20 4'/><circle cx='4' cy='20' r='2' fill='#fff'/><circle cx='20' cy='4' r='2' fill='#fff'/>",
+    rect: "<rect x='3' y='5' width='18' height='14' rx='1.5' fill='#fff'/>",
+    ellipse: "<ellipse cx='12' cy='12' rx='9' ry='6.5' fill='#fff'/>",
+    frect: "<rect x='3' y='5' width='18' height='14' rx='1.5' fill='#ffe066'/>",
+    fellipse: "<ellipse cx='12' cy='12' rx='9' ry='6.5' fill='#ffe066'/>",
+    text: "<path d='M4 7V4h16v3M9 20h6M12 4v16'/>",
   };
+  var tipEl = null, tipTimer = null;
+  function showTip(target, text) {
+    if (!text) return;
+    if (!tipEl) {
+      tipEl = el("div", { id: "custom-tooltip" });
+      document.body.appendChild(tipEl);
+    }
+    tipEl.textContent = text;
+    tipEl.classList.add("visible");
+    var r = target.getBoundingClientRect();
+    var tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+    var left = Math.max(6, Math.min(window.innerWidth - tw - 6, r.left + r.width / 2 - tw / 2));
+    var top = r.bottom + 7;
+    if (top + th > window.innerHeight - 6) top = r.top - th - 7;
+    tipEl.style.left = Math.round(left) + "px";
+    tipEl.style.top = Math.round(top) + "px";
+  }
+  function hideTip() {
+    clearTimeout(tipTimer);
+    tipTimer = null;
+    if (tipEl) tipEl.classList.remove("visible");
+  }
+  function attachTip(b, tip) {
+    b.removeAttribute("title");
+    b.setAttribute("aria-label", tip);
+    b.addEventListener("pointerenter", function () {
+      clearTimeout(tipTimer);
+      tipTimer = setTimeout(function () { showTip(b, tip); }, 500);
+    });
+    b.addEventListener("pointerleave", hideTip);
+    b.addEventListener("pointerdown", hideTip);
+  }
   function tb(icon, tip, fn, on) {
-    var b = el("button", { class: "tb" + (on ? " on" : ""), title: tip, "aria-label": tip, html: "<svg viewBox='0 0 24 24'>" + ICONS[icon] + "</svg>" });
+    var b = el("button", { class: "tb" + (on ? " on" : ""), html: "<svg viewBox='0 0 24 24'>" + ICONS[icon] + "</svg>" });
+    attachTip(b, tip);
     b.addEventListener("click", function () { fn(); $("canvas").focus(); });
     return b;
   }
@@ -534,10 +567,11 @@
     var c = $("catbar"); c.innerHTML = "";
     SL.CATS.forEach(function (cat) {
       var cv = el("canvas");
-      var b = el("button", { class: "catbtn" + (A.cat === cat.id ? " on" : ""), title: cat.label, "aria-label": cat.label }, [cv]);
+      var b = el("button", { class: "catbtn" + (A.cat === cat.id ? " on" : "") }, [cv]);
+      attachTip(b, cat.label);
       b.addEventListener("click", function () { A.cat = cat.id; renderCatbar(); renderSymbars(); });
       c.appendChild(b);
-      requestAnimationFrame(function () { SL.drawIcon(cv, cat.icon, "#000"); });
+      requestAnimationFrame(function () { SL.drawIcon(cv, cat.icon, "#1a1a1a"); });
     });
     c.appendChild(el("span", { id: "catlabel", text: (SL.CATS.find(function (x) { return x.id === A.cat; }) || {}).label }));
     c.hidden = !A.showSymbars;
@@ -547,10 +581,11 @@
     s.classList.toggle("disabled", !edit);
     SL.KIND_LIST.filter(function (k) { return k.cat === A.cat; }).forEach(function (k) {
       var cv = el("canvas");
-      var b = el("button", { class: "symbtn" + (A.tool.t === "place" && A.tool.kind === k.id ? " on" : ""), title: k.label, "aria-label": k.label }, [cv]);
+      var b = el("button", { class: "symbtn" + (A.tool.t === "place" && A.tool.kind === k.id ? " on" : "") }, [cv]);
+      attachTip(b, k.label);
       b.addEventListener("click", function () { if (A.tab().mode === "edit") A.setTool({ t: "place", kind: k.id }); $("canvas").focus(); });
       s.appendChild(b);
-      requestAnimationFrame(function () { SL.drawIcon(cv, k.id, "#000"); });
+      requestAnimationFrame(function () { SL.drawIcon(cv, k.id, "#1a1a1a"); });
     });
     s.hidden = !A.showSymbars;
   }
