@@ -107,6 +107,11 @@ test("on/off-delay timer", () => {
   eq(s.st[t].on, false);
 });
 
+test("click behaviour matches the original", () => {
+  ["PushNO", "PushNC", "MushroomNO", "MushroomNC", "LimitNO", "LimitNC"].forEach((k) => eq(SL.clickKind(k), "momentary", k));
+  ["SwitchNO", "SwitchNC", "Breaker3", "ThermalRelay3"].forEach((k) => eq(SL.clickKind(k), "toggle", k));
+});
+
 test("file format matches the Mac app", () => {
   const d = SL.normalizeDoc(JSON.parse(JSON.stringify(SL.exampleDoc())));
   eq(d.format, "ElectroCADSim-1");

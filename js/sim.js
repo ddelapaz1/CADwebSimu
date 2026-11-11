@@ -234,8 +234,9 @@
   SL.Sim = Sim;
 
   SL.clickKind = function (kind) {
-    if (kind === "PushNO" || kind === "PushNC") return "momentary";
-    if (["MushroomNO", "MushroomNC", "SwitchNO", "SwitchNC", "LimitNO", "LimitNC", "Breaker1", "Breaker2",
+    // momentary: push buttons, mushroom buttons, limit switches (sub_43ee20 / sub_45fe10)
+    if (["PushNO", "PushNC", "MushroomNO", "MushroomNC", "LimitNO", "LimitNC"].indexOf(kind) >= 0) return "momentary";
+    if (["SwitchNO", "SwitchNC", "Breaker1", "Breaker2",
       "Breaker3", "Switch2", "Switch3", "ThermalRelay3"].indexOf(kind) >= 0) return "toggle";
     return null;
   };
