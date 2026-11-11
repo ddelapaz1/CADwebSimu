@@ -2,7 +2,7 @@
 // The drawing area (mouse input and painting) is in editor.js.
 "use strict";
 (function (SL) {
-  var APP = "SimuLAB";
+  var APP = "CADiSemu";
   var STEP_SECS = 0.1; // "Paso a paso" advance (estimated, as in the Mac app)
   var STORE = "simulab.tabs.v1";
 
@@ -94,7 +94,7 @@
   };
   A.requestClose = function (i) {
     if (A.tabs[i].dirty) {
-      dialog("SimuLAB", [el("div", { text: "Voleu desar els canvis a " + A.tabs[i].title + "?" })], [
+      dialog(APP, [el("div", { text: "Voleu desar els canvis a " + A.tabs[i].title + "?" })], [
         ["Sí", function () { A.active = i; A.save(); A.closeTab(i); }],
         ["No", function () { A.closeTab(i); }],
         ["Cancel·la", null],
@@ -446,7 +446,7 @@
     }], ["Cancel·la", null]]);
   };
   A.about = function () {
-    dialog("Quant a " + APP, [el("div", { html: "<b>SimuLAB</b> — versió web 1.0<br>Editor i simulador d'esquemes elèctrics de comandament i potència.<br>Els esquemes es desen com a fitxers .ecs, compatibles amb la versió per a macOS." })], [["D'acord", null]]);
+    dialog("Quant a " + APP, [el("div", { html: "<b>CADiSemu</b> — versió web 1.0<br>Editor i simulador d'esquemes elèctrics de comandament i potència.<br>Els esquemes es desen com a fitxers .ecs, compatibles amb la versió per a macOS." })], [["D'acord", null]]);
   };
 
   // ------------------------------------------------------------------ menus & bars
@@ -599,7 +599,7 @@
       tab.addEventListener("click", function () { A.active = i; A.sel.clear(); A.wireFrom = null; refreshAll(); });
       c.appendChild(tab);
     });
-    document.title = "SimuLAB - [" + A.tab().title + (A.tab().dirty ? "*" : "") + "]";
+    document.title = APP + " - [" + A.tab().title + (A.tab().dirty ? "*" : "") + "]";
   }
 
   var MENUS = function () {
@@ -643,7 +643,7 @@
           ["Motor - Arrencada estrella-triangle", function () { A.loadExample(2); }],
         ]],
         "-",
-        ["Quant a SimuLAB...", A.about]]],
+        ["Quant a CADiSemu...", A.about]]],
     ];
   };
   function renderMenus() {
