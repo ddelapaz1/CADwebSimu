@@ -78,7 +78,8 @@
   };
   A.loadExample = function (which) {
     A.docCounter++;
-    A.tabs.push(newTab("Ejemplo" + A.docCounter, which === 2 ? SL.exampleYdDoc() : SL.exampleDoc()));
+    var doc = which === 3 ? SL.exampleRevDoc() : which === 2 ? SL.exampleYdDoc() : SL.exampleDoc();
+    A.tabs.push(newTab("Ejemplo" + A.docCounter, doc));
     A.active = A.tabs.length - 1;
     A.sel.clear();
     A.changed();
@@ -601,23 +602,36 @@
         return [(i + 1) + " " + tt.title, function () { A.active = i; A.sel.clear(); refreshAll(); }, null, false, i === A.active];
       }))],
       ["Ayuda", [
-        ["Abrir ejemplo: arranque directo de un motor", function () { A.loadExample(1); }],
-        ["Abrir ejemplo: arranque estrella-triángulo", function () { A.loadExample(2); }],
+        ["Circuitos de ejemplo", [
+          ["Motor - Arranque directo", function () { A.loadExample(1); }],
+          ["Motor - Inversión de giro", function () { A.loadExample(3); }],
+          ["Motor - Arranque estrella-triángulo", function () { A.loadExample(2); }],
+        ]],
+        "-",
         ["Acerca de SimuLAB...", A.about]]],
     ];
   };
   function renderMenus() {
     var bar = $("menubar"); bar.innerHTML = "";
+    function buildItem(container, it) {
+      if (it === "-") { container.appendChild(el("hr")); return; }
+      if (Array.isArray(it[1])) {
+        var sub = el("div", { class: "subitems" });
+        it[1].forEach(function (ch) { buildItem(sub, ch); });
+        var sw = el("div", { class: "submenu" }, [el("button", {}, [el("span", { text: it[0] })]), sub]);
+        sw.firstChild.addEventListener("click", function (e) { e.stopPropagation(); sw.classList.toggle("open"); });
+        container.appendChild(sw);
+        return;
+      }
+      var b = el("button", { class: it[4] ? "checked" : "" }, [el("span", { text: it[0] }), it[2] ? el("span", { class: "key", text: it[2] }) : null]);
+      if (it[3]) b.disabled = true;
+      b.addEventListener("click", function () { closeMenus(); it[1](); });
+      container.appendChild(b);
+    }
     MENUS().forEach(function (m) {
       var items = el("div", { class: "items" });
       var wrap = el("div", { class: "menu" }, [el("button", { text: m[0] }), items]);
-      m[1].forEach(function (it) {
-        if (it === "-") { items.appendChild(el("hr")); return; }
-        var b = el("button", { class: it[4] ? "checked" : "" }, [el("span", { text: it[0] }), it[2] ? el("span", { class: "key", text: it[2] }) : null]);
-        if (it[3]) b.disabled = true;
-        b.addEventListener("click", function () { closeMenus(); it[1](); });
-        items.appendChild(b);
-      });
+      m[1].forEach(function (it) { buildItem(items, it); });
       wrap.firstChild.addEventListener("click", function (e) {
         e.stopPropagation();
         var open = wrap.classList.contains("open");
@@ -687,7 +701,7 @@
   function init() {
     if (!restore()) A.tabs = [newTab("Esquema1", SL.newDoc())];
     var q = new URLSearchParams(location.search);
-    if (q.get("ejemplo") === "1" || q.get("ejemplo") === "2") A.loadExample(+q.get("ejemplo"));
+    if (q.get("ejemplo") === "1" || q.get("ejemplo") === "2" || q.get("ejemplo") === "3") A.loadExample(+q.get("ejemplo"));
     $("fileinput").addEventListener("change", onFile);
     window.addEventListener("keydown", onKey);
     window.addEventListener("beforeunload", persist);

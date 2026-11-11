@@ -27,6 +27,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; color: var(--text); back
 .items button.checked::before { content: "✓"; position: absolute; left: 3px; }
 .items button { position: relative; }
 .items hr { border: 0; border-top: 1px solid #b8b4a8; margin: 3px 4px; }
+.submenu { position: relative; }
+.submenu > button::after { content: "▸"; opacity: .75; }
+.submenu:hover > button { background: var(--sel); color: #fff; }
+.submenu .subitems { display: none; position: absolute; top: -4px; left: 100%; min-width: 240px; background: var(--panel-light); border: 1px solid var(--panel-dark); box-shadow: 2px 3px 6px rgba(0,0,0,.25); padding: 3px 0; }
+.submenu:hover > .subitems, .submenu.open > .subitems { display: block; }
 
 /* toolbars */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 3px 6px; background: var(--panel); border-bottom: 1px solid var(--border); }

@@ -44,6 +44,26 @@ test("star-delta sequence", () => {
   eq([s.st[m].motor, s.st[m].conn], [1, 2], "delta");
 });
 
+test("reversing starter sequence and interlock", () => {
+  const d = SL.exampleRevDoc();
+  const s = new SL.Sim(d);
+  const s0 = find(d, "PushNC", "-S0"), s1 = find(d, "PushNO", "-S1"), s2 = find(d, "PushNO", "-S2"), m = find(d, "Motor3", "-M1");
+  eq(s.tick(d, 0.1), null);
+  eq(s.st[m].motor, 0);
+  // Start forward (-S1)
+  s.setActuator(d, s1, true); eq(s.tick(d, 0.1), null); s.setActuator(d, s1, false); eq(s.tick(d, 0.1), null);
+  eq(s.st[m].motor, 1, "runs forward");
+  // Pressing reverse (-S2) while forward is running should be blocked by electrical interlock
+  s.setActuator(d, s2, true); eq(s.tick(d, 0.1), null); s.setActuator(d, s2, false); eq(s.tick(d, 0.1), null);
+  eq(s.st[m].motor, 1, "interlock prevents reverse while forward");
+  // Stop (-S0)
+  s.setActuator(d, s0, true); eq(s.tick(d, 0.1), null); s.setActuator(d, s0, false); eq(s.tick(d, 0.1), null);
+  eq(s.st[m].motor, 0, "stopped");
+  // Start reverse (-S2)
+  s.setActuator(d, s2, true); eq(s.tick(d, 0.1), null); s.setActuator(d, s2, false); eq(s.tick(d, 0.1), null);
+  eq(s.st[m].motor, -1, "runs reverse");
+});
+
 test("short circuit", () => {
   const d = SL.newDoc();
   SL.makeComp(d, "FeedLN", 0, 0, 0, "");

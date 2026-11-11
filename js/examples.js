@@ -99,4 +99,75 @@
     d.title.number = "2";
     return d;
   };
+
+  /** Reversing starter of a three-phase motor: KM1 forward, KM2 reverse (L1-L3 swapped). */
+  SL.exampleRevDoc = function () {
+    var d = SL.newDoc();
+    // Power circuit
+    add(d, "FeedL123", 150, 120, 0, "");
+    add(d, "Breaker3", 150, 180, 0, "-Q1").closed = true;
+    add(d, "Contactor3", 150, 315, 0, "-KM1");
+    add(d, "Contactor3", 300, 315, 0, "-KM2");
+    add(d, "ThermalRelay3", 150, 465, 0, "-F1");
+    add(d, "Motor3", 150, 585, 0, "-M1");
+    [150, 180, 210].forEach(function (x) {
+      SL.addWire(d, [x, 150], [x, 180]);
+      SL.addWire(d, [x, 240], [x, 315]);
+      SL.addWire(d, [x, 375], [x, 465]);
+      SL.addWire(d, [x, 525], [x, 585]);
+    });
+    // Top tap to KM2 (L1->1, L2->3, L3->5)
+    [[150, 255, 300], [180, 270, 330], [210, 285, 360]].forEach(function (r) {
+      SL.addWire(d, [r[0], r[1]], [r[2], r[1]]);
+      SL.addWire(d, [r[2], r[1]], [r[2], 315]);
+    });
+    // Bottom return from KM2 with L1<->L3 swapped (KM2.2->L3(210), KM2.4->L2(180), KM2.6->L1(150))
+    [[300, 435, 210], [330, 420, 180], [360, 405, 150]].forEach(function (r) {
+      SL.addWire(d, [r[0], 375], [r[0], r[1]]);
+      SL.addWire(d, [r[0], r[1]], [r[2], r[1]]);
+    });
+
+    // Control circuit
+    add(d, "FeedL", 540, 120, 0, "");
+    add(d, "Fuse1", 540, 180, 0, "-F2");
+    add(d, "ThermalNC", 540, 270, 0, "-F1");
+    add(d, "PushNC", 540, 360, 0, "-S0");
+
+    // Forward branch (KM1)
+    add(d, "PushNO", 540, 450, 0, "-S1");
+    add(d, "AuxNO", 630, 450, 0, "-KM1");
+    add(d, "AuxNC", 540, 540, 0, "-KM2");
+    add(d, "Coil", 540, 630, 0, "-KM1");
+    add(d, "Lamp", 630, 630, 0, "-H1");
+
+    // Reverse branch (KM2)
+    add(d, "PushNO", 750, 450, 0, "-S2");
+    add(d, "AuxNO", 840, 450, 0, "-KM2");
+    add(d, "AuxNC", 750, 540, 0, "-KM1");
+    add(d, "Coil", 750, 630, 0, "-KM2");
+    var h2 = add(d, "Lamp", 840, 630, 0, "-H2");
+    h2.color = "Amarillo";
+
+    add(d, "FeedN", 540, 765, 2, "");
+
+    // Control wires
+    [[[540, 150], [540, 180]], [[540, 240], [540, 270]], [[540, 330], [540, 360]],
+      [[540, 420], [540, 450]], [[540, 435], [630, 435]], [[630, 435], [750, 435]], [[750, 435], [840, 435]],
+      [[630, 435], [630, 450]], [[750, 435], [750, 450]], [[840, 435], [840, 450]],
+      // Forward branch connections
+      [[540, 510], [540, 540]], [[630, 510], [630, 525]], [[630, 525], [540, 525]],
+      [[540, 600], [540, 630]], [[540, 615], [630, 615]], [[630, 615], [630, 630]],
+      // Reverse branch connections
+      [[750, 510], [750, 540]], [[840, 510], [840, 525]], [[840, 525], [750, 525]],
+      [[750, 600], [750, 630]], [[750, 615], [840, 615]], [[840, 615], [840, 630]],
+      // Neutral rail
+      [[540, 690], [540, 720]], [[630, 690], [630, 720]], [[750, 690], [750, 720]], [[840, 690], [840, 720]],
+      [[540, 720], [630, 720]], [[630, 720], [750, 720]], [[750, 720], [840, 720]],
+      [[540, 720], [540, 735]]].forEach(function (w) { SL.addWire(d, w[0], w[1]); });
+
+    d.texts.push({ id: SL.newId(d), x: 120, y: 66, text: "Inversión de giro de un motor trifásico", size: 18, color: [0, 0, 0] });
+    d.title.title = "Inversión de giro";
+    d.title.number = "3";
+    return d;
+  };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);
