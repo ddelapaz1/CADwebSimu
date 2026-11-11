@@ -158,11 +158,12 @@
         s.term(0, 0, lab[0]); s.term(0, 60, lab[1]);
         break;
       }
-      case "Coil": case "TimerOn": case "TimerOff": case "Flasher": case "StepRelay":
+      case "Coil": case "TimerOn": case "TimerOff": case "TimerOnOff": case "Flasher": case "StepRelay":
         s.l([0, 0], [0, 20]); s.l([0, 40], [0, 60]);
         s.r([-12, 20], [12, 40], v.active ? HOT_FILL : null);
         if (kind === "TimerOn") { s.r([-26, 20], [-12, 40]); s.l([-26, 20], [-12, 40]); s.l([-26, 40], [-12, 20]); }
         if (kind === "TimerOff") s.r([-26, 20], [-12, 40], "stroke");
+        if (kind === "TimerOnOff") { s.r([-26, 20], [-12, 30], "stroke"); s.r([-26, 30], [-12, 40]); s.l([-26, 30], [-12, 40]); s.l([-26, 40], [-12, 30]); }
         if (kind === "Flasher") {
           s.r([-26, 20], [-12, 40]);
           s.poly([[-24, 34], [-22, 34], [-22, 26], [-19, 26], [-19, 34], [-16, 34], [-16, 26], [-14, 26]], false);

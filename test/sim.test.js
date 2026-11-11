@@ -87,6 +87,26 @@ test("timer preset follows the original tick table", () => {
   c.time_mult = 60; eq(SL.presetTicks(c), 5000);
 });
 
+test("on/off-delay timer", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedL", 0, 0, 0, "");
+  const sw = SL.makeComp(d, "SwitchNO", 0, 60, 0, "-S1").id;
+  const t = SL.makeComp(d, "TimerOnOff", 0, 150, 0, "-KT1", { time_base: 1 }).id;
+  SL.makeComp(d, "FeedN", 0, 210, 0, "");
+  SL.addWire(d, [0, 30], [0, 60]); SL.addWire(d, [0, 120], [0, 150]); SL.addWire(d, [0, 210], [0, 240]);
+  const s = new SL.Sim(d);
+  s.setActuator(d, sw, true); s.tick(d, 0.1);
+  for (let i = 0; i < 5; i++) s.tick(d, 0.1);
+  eq(s.st[t].on, false);
+  for (let i = 0; i < 8; i++) s.tick(d, 0.1);
+  eq(s.st[t].on, true);
+  s.setActuator(d, sw, false);
+  for (let i = 0; i < 5; i++) s.tick(d, 0.1);
+  eq(s.st[t].on, true);
+  for (let i = 0; i < 8; i++) s.tick(d, 0.1);
+  eq(s.st[t].on, false);
+});
+
 test("file format matches the Mac app", () => {
   const d = SL.normalizeDoc(JSON.parse(JSON.stringify(SL.exampleDoc())));
   eq(d.format, "ElectroCADSim-1");

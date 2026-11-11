@@ -94,7 +94,7 @@
     doc.comps.forEach(function (c) {
       if (!c.name) return;
       var st = self.s(c.id), on = null;
-      if (["Coil", "TimerOn", "TimerOff", "Flasher", "StepRelay"].indexOf(c.kind) >= 0) on = st.on;
+      if (["Coil", "TimerOn", "TimerOff", "TimerOnOff", "Flasher", "StepRelay"].indexOf(c.kind) >= 0) on = st.on;
       else if (c.kind === "ThermalRelay3") on = st.act;
       if (on !== null) m[c.name] = !!(m[c.name] || on);
     });
@@ -166,6 +166,9 @@
       var st = self.s(c.id), preset = SL.presetSecs(c);
       if (c.kind === "TimerOn") {
         if (st.energized) { st.t += dt; if (st.t >= preset) st.on = true; } else { st.t = 0; st.on = false; }
+      } else if (c.kind === "TimerOnOff") {
+        // sub_630f90: one preset after the supply appears and again after it goes
+        if (st.energized !== st.on) { st.t += dt; if (st.t >= preset) { st.on = st.energized; st.t = 0; } } else st.t = 0;
       } else if (c.kind === "TimerOff") {
         if (st.energized) { st.t = 0; st.on = true; }
         else if (st.on) { st.t += dt; if (st.t >= preset) { st.on = false; st.t = 0; } }
@@ -202,6 +205,7 @@
             case "Coil": on = e; break;
             case "TimerOn": on = e && st.on; break;
             case "TimerOff": on = e || st.on; break;
+            case "TimerOnOff": on = st.on; break;
             case "Flasher": on = e && st.on; break;
             case "StepRelay":
               if (e && !st.prev && !toggled[c.id]) { toggled[c.id] = true; on = !st.on; }

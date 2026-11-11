@@ -70,6 +70,7 @@ SL.CATS = [
     ["Coil", "Coils", "Bobina contactor, relé", "Load", 0, false, "-KM"],
     ["TimerOn", "Coils", "Temporizador a la conexión", "Load", 0, false, "-KT"],
     ["TimerOff", "Coils", "Temporizador a la desconexión", "Load", 0, false, "-KT"],
+    ["TimerOnOff", "Coils", "Temporizador a la conexión y desconexión", "Load", 0, false, "-KT"],
     ["Flasher", "Coils", "Temporizador intermitente", "Load", 0, false, "-KT"],
     ["StepRelay", "Coils", "Telerruptor", "Load", 0, false, "-KA"],
     ["Lamp", "Coils", "Lámpara (piloto)", "Load", 0, false, "-H"],
@@ -98,8 +99,8 @@ SL.CATS = [
       poles: r[4] || 0, nc: !!r[5], prefix: r[6] || "",
       feed: feeds[r[0]] || [],
     };
-    k.timer = ["TimerOn", "TimerOff", "Flasher"].indexOf(k.id) >= 0;
-    k.driver = ["Coil", "TimerOn", "TimerOff", "Flasher", "StepRelay", "ThermalRelay3"].indexOf(k.id) >= 0 || k.role === "Actuator";
+    k.timer = ["TimerOn", "TimerOff", "TimerOnOff", "Flasher"].indexOf(k.id) >= 0;
+    k.driver = ["Coil", "TimerOn", "TimerOff", "TimerOnOff", "Flasher", "StepRelay", "ThermalRelay3"].indexOf(k.id) >= 0 || k.role === "Actuator";
     SL.KINDS[k.id] = k;
     SL.KIND_LIST.push(k);
   });
