@@ -49,7 +49,7 @@
           if (c.kind === "ThermalRelay3") { vis.active = st.act; color = st.act ? C.RED : C.GRAY; } else color = C.GRAY;
         } else color = vis.closed ? C.RED : C.GRAY;
       } else {
-        vis.closed = K.role === "Manual" || K.nc; // contacts drawn at rest
+        vis.closed = K.role === "Manual" ? !!c.closed : K.nc; // contacts at rest, breakers as stored
       }
       var isSel = sel.has(c.id), cc = c;
       if (isSel && (dx || dy)) { cc = Object.assign({}, c); cc.x += dx; cc.y += dy; }
@@ -128,7 +128,17 @@
       var c = clickable(w);
       if (!c) return;
       if (SL.clickKind(c.kind) === "momentary") { t.sim.setActuator(t.doc, c.id, true); A.pressed = c.id; cv.setPointerCapture(e.pointerId); }
-      else t.sim.setActuator(t.doc, c.id, !t.sim.s(c.id).act);
+      else {
+        var nv = !t.sim.s(c.id).act;
+        t.sim.setActuator(t.doc, c.id, nv);
+        if (SL.KINDS[c.kind].role === "Manual") {
+          // breakers remember their position for the next run
+          t.doc.comps.forEach(function (o) {
+            if (o.id === c.id || (c.name && o.name === c.name && SL.KINDS[o.kind].role === "Manual")) o.closed = nv;
+          });
+          t.dirty = true; A.changed();
+        }
+      }
       if (t.mode === "sim") { var f = t.sim.tick(t.doc, 0); if (f) A.fault(t, f); }
       A.redraw();
       return;

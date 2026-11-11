@@ -80,7 +80,7 @@
     var self = this;
     doc.comps.forEach(function (c) {
       // breakers and switches start closed (estimated)
-      self.st[c.id] = { energized: false, on: false, t: 0, act: SL.KINDS[c.kind].role === "Manual",
+      self.st[c.id] = { energized: false, on: false, t: 0, act: SL.KINDS[c.kind].role === "Manual" && !!c.closed, // new breakers start open (sub_43ee20 / sub_40d2b0)
         motor: 0, conn: 0, angle: 0, prev: false };
     });
   }

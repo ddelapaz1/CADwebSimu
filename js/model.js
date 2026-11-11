@@ -137,6 +137,7 @@ SL.normalizeDoc = function (d) {
       time_base: c.time_base == null ? 5 : +c.time_base,
       time_mult: c.time_mult == null ? 1 : +c.time_mult,
       color: c.color || "Verde",
+      closed: !!c.closed, // breaker position, kept with the schematic
     };
   });
   n.wires = (d.wires || []).map(function (w) { return { id: w.id, a: [w.a[0], w.a[1]], b: [w.b[0], w.b[1]] }; });
@@ -202,7 +203,7 @@ SL.nextName = function (doc, kind) {
 SL.makeComp = function (doc, kind, x, y, rot, name, extra) {
   var c = {
     id: SL.newId(doc), kind: kind, x: x, y: y, rot: rot || 0, mirror: false,
-    name: name || "", func: "", time_base: 5, time_mult: 1, color: "Verde",
+    name: name || "", func: "", time_base: 5, time_mult: 1, color: "Verde", closed: false,
   };
   if (extra) Object.assign(c, extra);
   doc.comps.push(c);

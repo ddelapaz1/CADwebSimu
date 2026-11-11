@@ -9,7 +9,7 @@
   SL.exampleDoc = function () {
     var d = SL.newDoc();
     add(d, "FeedL123", 150, 120, 0, "");
-    add(d, "Breaker3", 150, 180, 0, "-Q1");
+    add(d, "Breaker3", 150, 180, 0, "-Q1").closed = true; // example starts with Q1 on
     add(d, "Contactor3", 150, 300, 0, "-KM1");
     add(d, "ThermalRelay3", 150, 420, 0, "-F1");
     add(d, "Motor3", 150, 540, 0, "-M1");
@@ -42,7 +42,7 @@
   SL.exampleYdDoc = function () {
     var d = SL.newDoc();
     add(d, "FeedL123", 150, 120, 0, "");
-    add(d, "Breaker3", 150, 180, 0, "-Q1");
+    add(d, "Breaker3", 150, 180, 0, "-Q1").closed = true;
     add(d, "ThermalRelay3", 150, 270, 0, "-F1");
     add(d, "Contactor3", 150, 360, 0, "-KM1");
     add(d, "Motor3YD", 150, 480, 0, "-M1");

@@ -112,6 +112,18 @@ test("click behaviour matches the original", () => {
   ["SwitchNO", "SwitchNC", "Breaker3", "ThermalRelay3"].forEach((k) => eq(SL.clickKind(k), "toggle", k));
 });
 
+test("new breaker starts open, stored position is used", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedL", 0, 0, 0, "");
+  const q = SL.makeComp(d, "Breaker1", 0, 60, 0, "-Q1");
+  const h = SL.makeComp(d, "Lamp", 0, 150, 0, "-H1").id;
+  SL.makeComp(d, "FeedN", 0, 210, 0, "");
+  SL.addWire(d, [0, 30], [0, 60]); SL.addWire(d, [0, 120], [0, 150]); SL.addWire(d, [0, 210], [0, 240]);
+  let s = new SL.Sim(d); s.tick(d, 0.1); eq(s.st[h].energized, false);
+  q.closed = true;
+  s = new SL.Sim(d); s.tick(d, 0.1); eq(s.st[h].energized, true);
+});
+
 test("file format matches the Mac app", () => {
   const d = SL.normalizeDoc(JSON.parse(JSON.stringify(SL.exampleDoc())));
   eq(d.format, "ElectroCADSim-1");
