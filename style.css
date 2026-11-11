@@ -1,0 +1,83 @@
+/* SimuLAB — classic engineering-tool look: light gray panels, white page. */
+:root {
+  --panel: #d4d0c8;
+  --panel-light: #ece9d8;
+  --panel-dark: #808080;
+  --border: #a0a0a0;
+  --sel: #0050c8;
+  --text: #111;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; color: var(--text); background: var(--panel); }
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* menu bar */
+#menubar { display: flex; gap: 2px; padding: 2px 6px; background: var(--panel); border-bottom: 1px solid var(--border); user-select: none; position: relative; z-index: 20; }
+.menu { position: relative; }
+.menu > button { background: none; border: 0; padding: 3px 8px; font: inherit; cursor: default; border-radius: 3px; }
+.menu > button:hover, .menu.open > button { background: #fff; }
+.menu .items { display: none; position: absolute; top: 100%; left: 0; min-width: 240px; background: var(--panel-light); border: 1px solid var(--panel-dark); box-shadow: 2px 3px 6px rgba(0,0,0,.25); padding: 3px 0; }
+.menu.open .items { display: block; }
+.items button { display: flex; justify-content: space-between; gap: 24px; width: 100%; text-align: left; background: none; border: 0; padding: 4px 14px; font: inherit; cursor: default; }
+.items button:hover:not(:disabled) { background: var(--sel); color: #fff; }
+.items button:disabled { color: #999; }
+.items button .key { opacity: .7; }
+.items button.checked::before { content: "✓"; position: absolute; left: 3px; }
+.items button { position: relative; }
+.items hr { border: 0; border-top: 1px solid #b8b4a8; margin: 3px 4px; }
+
+/* toolbars */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 3px 6px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.tb { width: 28px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 0; cursor: default; }
+.tb:hover { border-color: #999; background: #e8e6de; }
+.tb.on { background: #bcd4f6; border-color: #6a8fd0; }
+.tb svg { width: 18px; height: 18px; stroke: #222; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.sep { width: 1px; height: 22px; background: #a8a49a; margin: 0 4px; }
+.toolbar label { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
+.toolbar input[type=color] { width: 30px; height: 22px; border: 1px solid #888; padding: 0; background: none; }
+.toolbar select { font: inherit; }
+.catbtn { width: 32px; height: 32px; border: 1px solid transparent; border-radius: 3px; background: transparent; padding: 2px; }
+.catbtn:hover { background: #e8e6de; border-color: #aaa; }
+.catbtn.on { background: #fff; border-color: #555; }
+.catbtn canvas, .symbtn canvas { width: 100%; height: 100%; display: block; pointer-events: none; }
+#catlabel { font-style: italic; margin-left: 8px; color: #333; }
+.symbtn { width: 40px; height: 44px; border: 1px solid #a0a0a0; border-radius: 3px; background: #e0ddd4; padding: 4px; }
+.symbtn:hover { background: #f0eee6; }
+.symbtn.on { background: #fff; border-color: #0000a0; }
+.symbar.disabled .symbtn { opacity: .45; }
+
+/* tabs */
+#tabs { display: flex; gap: 2px; padding: 3px 6px 0; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.tab { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--border); border-bottom: 0; border-radius: 4px 4px 0 0; background: #c8c4bc; cursor: default; white-space: nowrap; }
+.tab.on { background: #fff; }
+.tab .x { border: 0; background: none; padding: 0 2px; font-size: 11px; cursor: pointer; }
+
+/* drawing area */
+#canvaswrap { position: relative; flex: 1; min-height: 0; background: var(--panel-dark); }
+#canvas { position: absolute; inset: 0; width: 100%; height: 100%; outline: none; touch-action: none; }
+
+/* status bar */
+#statusbar { display: flex; justify-content: space-between; gap: 12px; padding: 3px 8px; background: var(--panel); border-top: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+#statusbar .right { display: flex; gap: 14px; }
+#mode { font-weight: 600; }
+
+/* dialogs */
+#overlay { position: fixed; inset: 0; background: rgba(0,0,0,.18); display: flex; align-items: center; justify-content: center; z-index: 50; }
+#overlay[hidden] { display: none; }
+#dialog { min-width: 320px; max-width: 92vw; background: var(--panel-light); border: 1px solid #555; box-shadow: 4px 6px 18px rgba(0,0,0,.35); border-radius: 4px; }
+#dialog h2 { margin: 0; padding: 6px 10px; font-size: 13px; color: #fff; background: linear-gradient(#2a5bd7, #1941a5); border-radius: 3px 3px 0 0; }
+#dialog .body { padding: 12px 14px; display: grid; gap: 8px; }
+#dialog .row { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; }
+#dialog input[type=text], #dialog input[type=number] { font: inherit; padding: 3px 5px; border: 1px solid #888; }
+#dialog .radios { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+#dialog .hint { font-size: 11px; color: #444; }
+#dialog .buttons { display: flex; justify-content: flex-end; gap: 8px; padding: 0 14px 12px; }
+#dialog .buttons button { min-width: 80px; font: inherit; padding: 3px 10px; }
+#dialog .msg { display: flex; align-items: center; gap: 12px; font-size: 15px; }
+#dialog .msg .warn { font-size: 30px; color: #c00; }
+
+@media print {
+  #menubar, .toolbar, #tabs, #statusbar { display: none; }
+}
