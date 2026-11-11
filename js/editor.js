@@ -37,7 +37,7 @@
           vis.active = st.energized || st.on;
           if (c.kind === "Lamp" && st.energized) vis.lamp = SL.rgb(SL.LAMP_COLORS[c.color] || SL.LAMP_COLORS.Verde);
           if (c.kind === "Buzzer" || c.kind === "Horn") vis.active = st.energized;
-          vis.motor = st.motor; vis.angle = st.angle;
+          vis.motor = st.motor; vis.conn = st.conn; vis.angle = st.angle;
           if (K.timer && (st.energized || st.on) && !(c.kind === "TimerOnOff" && st.energized === st.on)) {
             var rem = c.kind === "TimerOn" && st.on ? 0 : Math.max(0, SL.presetSecs(c) - st.t);
             extra = rem.toFixed(1) + " s";

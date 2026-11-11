@@ -176,7 +176,10 @@
         if (st.energized) { st.t += dt; if (st.t >= Math.max(preset, 0.05)) { st.t = 0; st.on = !st.on; } }
         else { st.t = 0; st.on = false; }
       }
-      if (st.motor) st.angle += dt * 6;
+      if (st.motor) {
+        var speed = c.kind === "Motor3YD" ? (st.conn === 1 ? 3 : 8) : 6;
+        st.angle += dt * speed * st.motor;
+      }
     });
     var toggled = {};
     for (var it = 0; it < MAX_SETTLE; it++) {

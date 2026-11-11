@@ -56,10 +56,16 @@
   }
 
   function rotorMarks(s, c, r, angle, dir) {
-    var a = angle * dir;
+    var a = angle;
     for (var k = 0; k < 3; k++) {
-      var ang = a + k * 2.094;
-      s.prims.push({ t: "circle", c: [c[0] + r * Math.cos(ang), c[1] + r * Math.sin(ang)], r: 2.5, fill: "rgb(0,128,0)", color: "rgb(0,128,0)" });
+      var ang = a + k * (2 * PI / 3);
+      var px = c[0] + r * Math.cos(ang), py = c[1] + r * Math.sin(ang);
+      s.prims.push({ t: "circle", c: [px, py], r: 3, fill: "rgb(0,150,0)", color: "rgb(0,110,0)" });
+      if (dir) {
+        var tang = ang - dir * 0.35;
+        var tx = c[0] + r * Math.cos(tang), ty = c[1] + r * Math.sin(tang);
+        s.prims.push({ t: "line", a: [tx, ty], b: [px, py], color: "rgb(0,150,0)" });
+      }
     }
   }
 
@@ -135,7 +141,13 @@
           s.term(0, 0, "U"); s.term(30, 0, "V"); s.term(60, 0, "W");
         }
         s.term(90, 0, "PE");
-        if (v.motor) directionArrow(s, v.motor);
+        if (v.motor) {
+          directionArrow(s, v.motor);
+          rotorMarks(s, [30, 60], 38, v.angle || 0, v.motor);
+          if (kind === "Motor3YD" && v.conn) {
+            s.text([30, 86], v.conn === 1 ? "Y" : "Δ", 12);
+          }
+        }
         break;
       case "Motor1":
         s.l([0, 0], [0, 41]); s.l([30, 0], [30, 41]);
