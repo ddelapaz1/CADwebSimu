@@ -1,4 +1,4 @@
-# CADiSemu
+# CADwebSimu
 
 Editor i simulador d'esquemes elèctrics de comandament i potència que funciona al navegador
 (HTML, CSS i JavaScript, sense instal·lar res).

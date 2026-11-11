@@ -2,7 +2,7 @@
 // The drawing area (mouse input and painting) is in editor.js.
 "use strict";
 (function (SL) {
-  var APP = "CADiSemu";
+  var APP = "CADwebSimu";
   var STEP_SECS = 0.1; // "Paso a paso" advance (estimated, as in the Mac app)
   var STORE = "simulab.tabs.v1";
 
@@ -446,7 +446,7 @@
     }], ["Cancel·la", null]]);
   };
   A.about = function () {
-    dialog("Quant a " + APP, [el("div", { html: "<b>CADiSemu</b> — versió web 1.0<br>Editor i simulador d'esquemes elèctrics de comandament i potència.<br>Els esquemes es desen com a fitxers .ecs, compatibles amb la versió per a macOS." })], [["D'acord", null]]);
+    dialog("Quant a " + APP, [el("div", { html: "<b>CADwebSimu</b> — versió web 1.0<br>Editor i simulador d'esquemes elèctrics de comandament i potència.<br>Els esquemes es desen com a fitxers .ecs, compatibles amb la versió per a macOS." })], [["D'acord", null]]);
   };
 
   // ------------------------------------------------------------------ menus & bars
@@ -643,7 +643,7 @@
           ["Motor - Arrencada estrella-triangle", function () { A.loadExample(2); }],
         ]],
         "-",
-        ["Quant a CADiSemu...", A.about]]],
+        ["Quant a CADwebSimu...", A.about]]],
     ];
   };
   function renderMenus() {
