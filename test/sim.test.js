@@ -79,6 +79,14 @@ test("on-delay timer", () => {
   eq(s.st[t].on, true);
 });
 
+test("timer preset follows the original tick table", () => {
+  const c = { time_base: 5.7, time_mult: 1 };
+  eq(SL.presetTicks(c), 50);
+  c.time_mult = 0.1; eq(SL.presetTicks(c), 5);
+  c.time_mult = 10; eq(SL.presetTicks(c), 500);
+  c.time_mult = 60; eq(SL.presetTicks(c), 5000);
+});
+
 test("file format matches the Mac app", () => {
   const d = SL.normalizeDoc(JSON.parse(JSON.stringify(SL.exampleDoc())));
   eq(d.format, "ElectroCADSim-1");

@@ -392,7 +392,7 @@
     var K = SL.KINDS[c.kind], name = textInput(c.name), func = textInput(c.func), body = [el("b", { text: K.label }), row("Nombre:", name), row("Función:", func)];
     var base, mult, color;
     if (K.timer) {
-      base = el("input", { type: "number", step: "any", min: "0", style: "width:80px" }); base.value = c.time_base;
+      base = el("input", { type: "number", step: "1", min: "0", style: "width:80px" }); base.value = c.time_base;
       mult = radios("mult", [[0.1, "x 0,1 Seg"], [1, "x 1 Seg"], [10, "x 10 Seg"], [60, "x 60 Seg"]], c.time_mult);
       body.push(el("div", {}, [el("div", { text: "Temporización" }), el("div", { class: "radios" }, [base, mult])]));
     }

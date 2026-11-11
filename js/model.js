@@ -151,7 +151,13 @@ SL.normalizeDoc = function (d) {
 
 SL.newId = function (doc) { return doc.next_id++; };
 
-SL.presetSecs = function (c) { return Math.max(0, c.time_base * c.time_mult); };
+// Timer presets as the original computes them (sub_62de30 / sub_62f730 /
+// sub_632c70): ticks = atoi(value) x 1 / 10 / 100 / 1000 for "x 0,1 Seg",
+// "x 1 Seg", "x 10 Seg", "x 60 Seg"; one tick = 0.1 s.
+SL.TICK_SECS = 0.1;
+SL.ticksPerUnit = function (mult) { return mult < 0.5 ? 1 : mult < 5 ? 10 : mult < 30 ? 100 : 1000; };
+SL.presetTicks = function (c) { return Math.trunc(Math.max(0, c.time_base)) * SL.ticksPerUnit(c.time_mult); };
+SL.presetSecs = function (c) { return SL.presetTicks(c) * SL.TICK_SECS; };
 
 SL.snap = function (v) { return Math.round(v / SL.GRID) * SL.GRID; };
 
