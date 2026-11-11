@@ -9,9 +9,9 @@
   var MAX_SETTLE = 40;
 
   SL.FAULTS = {
-    Short: "Se ha producido un cortocircuito",
-    Earth: "Se ha producido una derivación a tierra",
-    GroundFed: "Se esta alimentado una conexion de masa",
+    Short: "S'ha produït un curtcircuit",
+    Earth: "S'ha produït una derivació a terra",
+    GroundFed: "S'està alimentant una connexió de massa",
   };
 
   function bits(m) { var n = 0; while (m) { n += m & 1; m >>= 1; } return n; }

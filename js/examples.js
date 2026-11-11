@@ -32,8 +32,8 @@
       [[480, 435], [570, 435]], [[570, 435], [570, 450]], [[480, 510], [480, 555]], [[570, 510], [570, 525]],
       [[570, 525], [480, 525]], [[570, 525], [660, 525]], [[660, 525], [660, 555]], [[480, 615], [480, 690]],
       [[660, 615], [660, 645]], [[660, 645], [480, 645]]].forEach(function (w) { SL.addWire(d, w[0], w[1]); });
-    d.texts.push({ id: SL.newId(d), x: 120, y: 66, text: "Arranque directo de un motor trifásico", size: 18, color: [0, 0, 0] });
-    d.title.title = "Arranque directo";
+    d.texts.push({ id: SL.newId(d), x: 120, y: 66, text: "Arrencada directa d'un motor trifàsic", size: 18, color: [0, 0, 0] });
+    d.title.title = "Arrencada directa";
     d.title.number = "1";
     return d;
   };
@@ -94,8 +94,8 @@
     });
     [[[600, 660], [600, 795]], [[780, 660], [780, 795]], [[600, 795], [780, 795]], [[780, 795], [900, 795]],
       [[900, 795], [1050, 795]], [[600, 795], [600, 825]]].forEach(function (w) { SL.addWire(d, w[0], w[1]); });
-    d.texts.push({ id: SL.newId(d), x: 120, y: 66, text: "Arranque estrella-triángulo", size: 18, color: [0, 0, 0] });
-    d.title.title = "Arranque estrella-triángulo";
+    d.texts.push({ id: SL.newId(d), x: 120, y: 66, text: "Arrencada estrella-triangle", size: 18, color: [0, 0, 0] });
+    d.title.title = "Arrencada estrella-triangle";
     d.title.number = "2";
     return d;
   };
@@ -165,8 +165,8 @@
       [[540, 720], [630, 720]], [[630, 720], [750, 720]], [[750, 720], [840, 720]],
       [[540, 720], [540, 735]]].forEach(function (w) { SL.addWire(d, w[0], w[1]); });
 
-    d.texts.push({ id: SL.newId(d), x: 120, y: 66, text: "Inversión de giro de un motor trifásico", size: 18, color: [0, 0, 0] });
-    d.title.title = "Inversión de giro";
+    d.texts.push({ id: SL.newId(d), x: 120, y: 66, text: "Inversió de gir d'un motor trifàsic", size: 18, color: [0, 0, 0] });
+    d.title.title = "Inversió de gir";
     d.title.number = "3";
     return d;
   };

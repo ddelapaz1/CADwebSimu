@@ -81,7 +81,7 @@
       var tf = Math.max(5, 11 * this.v.zoom), t = doc.title;
       rect([X0, Y0], [W - inset, H - inset]);
       line([col1, Y0], [col1, Y0 + bh]); line([col2, Y0], [col2, Y0 + bh]);
-      [["Dibujado", t.drawn], ["Comprobado", t.checked], ["Fecha", t.date]].forEach(function (r, i) {
+      [["Dibuixat", t.drawn], ["Comprovat", t.checked], ["Data", t.date]].forEach(function (r, i) {
         var y = Y0 + rh * i;
         if (i > 0) line([X0, y], [col2, y]);
         self.text(self.s([X0 + 6, y + rh / 2]), r[0], tf, "#000", "left");
@@ -89,11 +89,11 @@
       });
       var ym = Y0 + bh / 2;
       line([col2, ym], [W - inset, ym]);
-      this.text(this.s([col2 + 6, Y0 + 14]), "Entidad", tf * 0.8, "#555", "left");
+      this.text(this.s([col2 + 6, Y0 + 14]), "Entitat", tf * 0.8, "#555", "left");
       this.text(this.s([col2 + 6, Y0 + 45]), t.entity || "", tf * 1.2, "#000", "left");
-      this.text(this.s([col2 + 6, ym + 14]), "Título", tf * 0.8, "#555", "left");
+      this.text(this.s([col2 + 6, ym + 14]), "Títol", tf * 0.8, "#555", "left");
       this.text(this.s([col2 + 6, ym + 45]), t.title || "", tf * 1.4, "#000", "left");
-      this.text(this.s([W - inset - 8, ym + 14]), "Nº " + (t.number || ""), tf, "#000", "right");
+      this.text(this.s([W - inset - 8, ym + 14]), "Núm. " + (t.number || ""), tf, "#000", "right");
     }
   };
 

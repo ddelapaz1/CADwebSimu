@@ -79,7 +79,7 @@
   A.loadExample = function (which) {
     A.docCounter++;
     var doc = which === 3 ? SL.exampleRevDoc() : which === 2 ? SL.exampleYdDoc() : SL.exampleDoc();
-    A.tabs.push(newTab("Ejemplo" + A.docCounter, doc));
+    A.tabs.push(newTab("Exemple" + A.docCounter, doc));
     A.active = A.tabs.length - 1;
     A.sel.clear();
     A.changed();
@@ -94,10 +94,10 @@
   };
   A.requestClose = function (i) {
     if (A.tabs[i].dirty) {
-      dialog("SimuLAB", [el("div", { text: "¿Guardar cambios en " + A.tabs[i].title + "?" })], [
+      dialog("SimuLAB", [el("div", { text: "Voleu desar els canvis a " + A.tabs[i].title + "?" })], [
         ["Sí", function () { A.active = i; A.save(); A.closeTab(i); }],
         ["No", function () { A.closeTab(i); }],
-        ["Cancelar", null],
+        ["Cancel·la", null],
       ]);
     } else A.closeTab(i);
   };
@@ -117,9 +117,9 @@
         A.active = A.tabs.indexOf(t);
         A.sel.clear();
         A.changed();
-      } catch (err) { message("El archivo no es valido"); }
+      } catch (err) { message("El fitxer no és vàlid"); }
     };
-    rd.onerror = function () { message("No se puede abrir el archivo"); };
+    rd.onerror = function () { message("No es pot obrir el fitxer"); };
     rd.readAsText(f);
   }
   function download(name, blob) {
@@ -132,11 +132,11 @@
     download(t.title + ".ecs", new Blob([JSON.stringify(t.doc, null, 2)], { type: "application/json" }));
     t.dirty = false;
     A.changed();
-    setStatus("Guardado como " + t.title + ".ecs (en Descargas)");
+    setStatus("Desat com a " + t.title + ".ecs (a Baixades)");
   };
   A.saveAs = function () {
     var t = A.tab();
-    promptText("Guardar como", "Nombre:", t.title, function (v) {
+    promptText("Anomena i desa", "Nom:", t.title, function (v) {
       if (v) { t.title = v; A.save(); }
     });
   };
@@ -154,7 +154,7 @@
   A.print = function () {
     var url = pageCanvas().toDataURL("image/png");
     var w = window.open("", "_blank");
-    if (!w) { message("Permita las ventanas emergentes para imprimir"); return; }
+    if (!w) { message("Permeteu les finestres emergents per imprimir"); return; }
     w.document.write("<title>" + A.tab().title + "</title><style>@page{size:landscape;margin:8mm}body{margin:0}img{width:100%}</style>" +
       "<img src='" + url + "' onload='setTimeout(function(){print()},200)'>");
     w.document.close();
@@ -249,12 +249,12 @@
     A.tool = t; A.wireFrom = null; A.drag = null;
     if (t.t !== "place") { A.placeRot = 0; A.placeMirror = false; }
     var msg = {
-      wire: "Cable: clic en el inicio y en cada esquina; termina al llegar a un terminal o a otro cable (Esc cancela)",
-      text: "Texto: haga clic donde quiera escribir",
-      shape: "Dibujo: arrastre para dibujar",
-      zoomwin: "Zoom ventana: arrastre un rectángulo",
-      select: "Preparado",
-    }[t.t] || (SL.KINDS[t.kind] ? SL.KINDS[t.kind].label + ": clic en el esquema para colocarlo (R gira, M espejo, Esc termina)" : "");
+      wire: "Cable: feu clic a l'inici i a cada cantonada; acaba en arribar a un terminal o a un altre cable (Esc cancel·la)",
+      text: "Text: feu clic on vulgueu escriure",
+      shape: "Dibuix: arrossegueu per dibuixar",
+      zoomwin: "Zoom finestra: arrossegueu un rectangle",
+      select: "Preparat",
+    }[t.t] || (SL.KINDS[t.kind] ? SL.KINDS[t.kind].label + ": feu clic a l'esquema per col·locar-lo (R gira, M mirall, Esc acaba)" : "");
     setStatus(msg);
     renderToolbars(); renderSymbars(); A.redraw();
   };
@@ -272,14 +272,14 @@
       }
     });
     A.lastT = null;
-    setStatus("Simulación: pulse sobre pulsadores, interruptores y automáticos para accionarlos");
+    setStatus("Simulació: feu clic sobre polsadors, interruptors i automàtics per accionar-los");
     faults.forEach(function (x) { A.fault(x[0], x[1]); });
     refreshAll();
   };
   A.stopSim = function () {
     var t = A.tab();
     t.mode = "edit"; t.sim = null; A.pressed = null;
-    setStatus("Preparado");
+    setStatus("Preparat");
     refreshAll();
   };
   A.pause = function () {
@@ -299,7 +299,7 @@
   /** As in the original: message, stop, back to editing. */
   A.fault = function (t, f) {
     t.mode = "edit"; A.pressed = null;
-    setStatus("Preparado");
+    setStatus("Preparat");
     message(SL.FAULTS[f] || f);
     refreshAll();
   };
@@ -358,7 +358,7 @@
     if (first && first.select) first.select();
   }
   function message(text) {
-    dialog(APP, [el("div", { class: "msg" }, [el("span", { class: "warn", text: "⚠" }), el("span", { text: text })])], [["Aceptar", null]]);
+    dialog(APP, [el("div", { class: "msg" }, [el("span", { class: "warn", text: "⚠" }), el("span", { text: text })])], [["D'acord", null]]);
   }
   A.message = message;
   function row(label, input) { return el("div", { class: "row" }, [el("label", { text: label }), input]); }
@@ -380,7 +380,7 @@
   }
   function promptText(title, label, value, done) {
     var i = textInput(value);
-    dialog(title, [row(label, i)], [["OK", function () { done(i.value.trim()); }], ["Cancel", null]]);
+    dialog(title, [row(label, i)], [["D'acord", function () { done(i.value.trim()); }], ["Cancel·la", null]]);
   }
 
   A.openProps = function (id) {
@@ -390,63 +390,63 @@
       if (tx) A.textDialog(tx, null);
       return;
     }
-    var K = SL.KINDS[c.kind], name = textInput(c.name), func = textInput(c.func), body = [el("b", { text: K.label }), row("Nombre:", name), row("Función:", func)];
+    var K = SL.KINDS[c.kind], name = textInput(c.name), func = textInput(c.func), body = [el("b", { text: K.label }), row("Nom:", name), row("Funció:", func)];
     var base, mult, color;
     if (K.timer) {
       base = el("input", { type: "number", step: "1", min: "0", style: "width:80px" }); base.value = c.time_base;
       mult = radios("mult", [[0.1, "x 0,1 Seg"], [1, "x 1 Seg"], [10, "x 10 Seg"], [60, "x 60 Seg"]], c.time_mult);
-      body.push(el("div", {}, [el("div", { text: "Temporización" }), el("div", { class: "radios" }, [base, mult])]));
+      body.push(el("div", {}, [el("div", { text: "Temporització" }), el("div", { class: "radios" }, [base, mult])]));
     }
     if (c.kind === "Lamp") {
-      color = radios("color", Object.keys(SL.LAMP_COLORS).map(function (k) { return [k, k]; }), c.color);
+      color = radios("color", SL.LAMP_COLOR_OPTIONS || Object.keys(SL.LAMP_COLORS).map(function (k) { return [k, k]; }), c.color);
       body.push(el("div", {}, [el("div", { text: "Color" }), color]));
     }
-    if (K.role === "Contact" || K.role === "Poles") body.push(el("div", { class: "hint", text: "Los contactos siguen a la bobina, temporizador o relé térmico con el mismo nombre." }));
-    if (K.role === "Actuator") body.push(el("div", { class: "hint", text: "Todos los accionamientos con el mismo nombre se mueven a la vez." }));
-    var title = K.timer ? "Temporizadores" : c.kind === "Lamp" ? "Indicador color" : "Editar";
-    dialog(title, body, [["OK", function () {
+    if (K.role === "Contact" || K.role === "Poles") body.push(el("div", { class: "hint", text: "Els contactes segueixen la bobina, temporitzador o relé tèrmic amb el mateix nom." }));
+    if (K.role === "Actuator") body.push(el("div", { class: "hint", text: "Tots els accionaments amb el mateix nom es mouen alhora." }));
+    var title = K.timer ? "Temporitzadors" : c.kind === "Lamp" ? "Indicador color" : "Edita";
+    dialog(title, body, [["D'acord", function () {
       A.checkpoint();
       c.name = name.value.trim(); c.func = func.value;
       if (base) { var b = parseFloat(String(base.value).replace(",", ".")); c.time_base = isFinite(b) && b >= 0 ? b : 5; c.time_mult = parseFloat(mult.value()) || 1; }
       if (color) c.color = color.value() || "Verde";
       A.changed();
-    }], ["Cancel", null]]);
+    }], ["Cancel·la", null]]);
   };
   A.textDialog = function (item, pos) {
     var txt = textInput(item ? item.text : ""), size = el("input", { type: "number", min: "6", max: "60", style: "width:70px" });
     size.value = item ? item.size : 14;
-    dialog("Texto", [row("Texto:", txt), row("Tamaño:", size)], [["OK", function () {
+    dialog("Text", [row("Text:", txt), row("Mida:", size)], [["D'acord", function () {
       var v = txt.value.trim();
       if (!v) return;
       A.checkpoint();
       if (item) { item.text = v; item.size = +size.value || 14; }
       else A.tab().doc.texts.push({ id: SL.newId(A.tab().doc), x: pos[0], y: pos[1], text: v, size: +size.value || 14, color: A.drawColor.slice() });
       A.changed();
-    }], ["Cancel", null]]);
+    }], ["Cancel·la", null]]);
   };
   A.titleDialog = function () {
-    var tb = A.tab().doc.title, fields = [["Dibujado", "drawn"], ["Comprobado", "checked"], ["Fecha", "date"], ["Entidad", "entity"], ["Título", "title"], ["Número", "number"]];
+    var tb = A.tab().doc.title, fields = [["Dibuixat", "drawn"], ["Comprovat", "checked"], ["Data", "date"], ["Entitat", "entity"], ["Títol", "title"], ["Número", "number"]];
     var inputs = fields.map(function (f) { return textInput(tb[f[1]]); });
-    dialog("Cajetín", fields.map(function (f, i) { return row(f[0], inputs[i]); }), [["OK", function () {
+    dialog("Caixetí", fields.map(function (f, i) { return row(f[0], inputs[i]); }), [["D'acord", function () {
       A.checkpoint();
       fields.forEach(function (f, i) { tb[f[1]] = inputs[i].value; });
       A.tab().doc.page.title_block = true;
       A.changed();
-    }], ["Cancel", null]]);
+    }], ["Cancel·la", null]]);
   };
   A.configDialog = function () {
     var pg = A.tab().doc.page;
     var size = radios("size", Object.keys(SL.PAGE_SIZES).map(function (k) { return [k, SL.PAGE_SIZES[k].label]; }), pg.size);
-    var b = check("Contorno", pg.border), r = check("Referencias", pg.references), t = check("Cajetín", pg.title_block), s = check("Visualizar conexiones símbolo", pg.show_terminals);
-    dialog("Configuración", [el("div", { text: "Formato" }), size, b, r, t, s], [["OK", function () {
+    var b = check("Contorn", pg.border), r = check("Referències", pg.references), t = check("Caixetí", pg.title_block), s = check("Visualitza connexions símbol", pg.show_terminals);
+    dialog("Configuració", [el("div", { text: "Format" }), size, b, r, t, s], [["D'acord", function () {
       A.checkpoint();
       pg.size = size.value() || pg.size; pg.border = b.input.checked; pg.references = r.input.checked;
       pg.title_block = t.input.checked; pg.show_terminals = s.input.checked;
       A.changed();
-    }], ["Cancel", null]]);
+    }], ["Cancel·la", null]]);
   };
   A.about = function () {
-    dialog("Acerca de " + APP, [el("div", { html: "<b>SimuLAB</b> — versión web 1.0<br>Editor y simulador de esquemas eléctricos de mando y potencia.<br>Los esquemas se guardan como archivos .ecs, compatibles con la versión para macOS." })], [["Aceptar", null]]);
+    dialog("Quant a " + APP, [el("div", { html: "<b>SimuLAB</b> — versió web 1.0<br>Editor i simulador d'esquemes elèctrics de comandament i potència.<br>Els esquemes es desen com a fitxers .ecs, compatibles amb la versió per a macOS." })], [["D'acord", null]]);
   };
 
   // ------------------------------------------------------------------ menus & bars
@@ -527,26 +527,26 @@
   function renderToolbars() {
     var t = A.tab(), mode = t.mode, T = A.tool;
     var a = $("toolbar1"); a.innerHTML = "";
-    [tb("new", "Nuevo", A.newDoc), tb("open", "Abrir", A.open), tb("save", "Guardar", A.save), tb("print", "Imprimir", A.print), sep(),
-      tb("cut", "Cortar", A.cut), tb("copy", "Copiar", A.copy), tb("paste", "Pegar", A.paste), sep(),
+    [tb("new", "Nou", A.newDoc), tb("open", "Obre", A.open), tb("save", "Desa", A.save), tb("print", "Imprimeix", A.print), sep(),
+      tb("cut", "Retalla", A.cut), tb("copy", "Copia", A.copy), tb("paste", "Enganxa", A.paste), sep(),
       tb("zoomin", "Zoom +", function () { A.zoomCenter(1.25); }), tb("zoomout", "Zoom -", function () { A.zoomCenter(0.8); }),
-      tb("zoomwin", "Zoom ventana", function () { A.setTool({ t: "zoomwin" }); }, T.t === "zoomwin"),
-      tb("zoomall", "Zoom todo", function () { A.pushView(); A.zoomAll(); }), tb("zoomprev", "Zoom anterior", A.zoomPrev),
-      tb("grid", "Rejilla", function () { A.grid = !A.grid; renderToolbars(); A.redraw(); }, A.grid), sep(),
-      tb("undo", "Deshacer", A.undo), tb("redo", "Rehacer", A.redo), sep(),
-      tb("rotl", "Girar a la izquierda", function () { A.rotate(3, false); }), tb("rotr", "Girar a la derecha (R)", function () { A.rotate(1, false); }),
-      tb("mirror", "Espejo (M)", function () { A.rotate(0, true); }), sep(),
-      tb("play", "Simulación (F5)", function () { A.startSim(false); }, mode === "sim"), tb("stop", "Stop / Edición", A.stopSim, mode === "edit"),
-      tb("pause", "Pausa", A.pause, mode === "pause"), tb("step", "Paso a Paso", A.step), tb("all", "Simular todos los documentos", function () { A.startSim(true); }), sep(),
-      tb("info", "Acerca de", A.about)].forEach(function (x) { a.appendChild(x); });
+      tb("zoomwin", "Zoom finestra", function () { A.setTool({ t: "zoomwin" }); }, T.t === "zoomwin"),
+      tb("zoomall", "Zoom tot", function () { A.pushView(); A.zoomAll(); }), tb("zoomprev", "Zoom anterior", A.zoomPrev),
+      tb("grid", "Reixeta", function () { A.grid = !A.grid; renderToolbars(); A.redraw(); }, A.grid), sep(),
+      tb("undo", "Desfés", A.undo), tb("redo", "Refés", A.redo), sep(),
+      tb("rotl", "Gira a l'esquerra", function () { A.rotate(3, false); }), tb("rotr", "Gira a la dreta (R)", function () { A.rotate(1, false); }),
+      tb("mirror", "Mirall (M)", function () { A.rotate(0, true); }), sep(),
+      tb("play", "Simulació (F5)", function () { A.startSim(false); }, mode === "sim"), tb("stop", "Stop / Edició", A.stopSim, mode === "edit"),
+      tb("pause", "Pausa", A.pause, mode === "pause"), tb("step", "Pas a pas", A.step), tb("all", "Simula tots els documents", function () { A.startSim(true); }), sep(),
+      tb("info", "Quant a", A.about)].forEach(function (x) { a.appendChild(x); });
     var b = $("toolbar2"); b.innerHTML = "";
-    b.appendChild(tb("select", "Seleccionar", function () { A.setTool({ t: "select" }); }, T.t === "select"));
-    b.appendChild(tb("wire", "Cable (conectar terminales)", function () { A.setTool({ t: "wire" }); }, T.t === "wire"));
+    b.appendChild(tb("select", "Selecciona", function () { A.setTool({ t: "select" }); }, T.t === "select"));
+    b.appendChild(tb("wire", "Cable (connecta terminals)", function () { A.setTool({ t: "wire" }); }, T.t === "wire"));
     b.appendChild(sep());
-    [["line", "Línea", "Line"], ["rect", "Rectángulo", "Rect"], ["ellipse", "Elipse", "Ellipse"], ["frect", "Rectángulo coloreado", "FilledRect"], ["fellipse", "Elipse coloreada", "FilledEllipse"]].forEach(function (s) {
+    [["line", "Línia", "Line"], ["rect", "Rectangle", "Rect"], ["ellipse", "El·lipse", "Ellipse"], ["frect", "Rectangle acolorit", "FilledRect"], ["fellipse", "El·lipse acolorida", "FilledEllipse"]].forEach(function (s) {
       b.appendChild(tb(s[0], s[1], function () { A.setTool({ t: "shape", kind: s[2] }); }, T.t === "shape" && T.kind === s[2]));
     });
-    b.appendChild(tb("text", "Texto", function () { A.setTool({ t: "text" }); }, T.t === "text"));
+    b.appendChild(tb("text", "Text", function () { A.setTool({ t: "text" }); }, T.t === "text"));
     b.appendChild(sep());
     function colorInput(label, arr) {
       var i = el("input", { type: "color", title: label });
@@ -555,9 +555,9 @@
       return el("label", {}, [document.createTextNode(label), i]);
     }
     b.appendChild(colorInput("Color", A.drawColor));
-    b.appendChild(colorInput("Relleno", A.fillColor));
-    var sel = el("select", { title: "Espesor" });
-    [1, 2, 3, 4].forEach(function (w) { var o = el("option", { value: String(w), text: "Espesor " + w }); if (w === A.drawWidth) o.selected = true; sel.appendChild(o); });
+    b.appendChild(colorInput("Farciment", A.fillColor));
+    var sel = el("select", { title: "Gruix" });
+    [1, 2, 3, 4].forEach(function (w) { var o = el("option", { value: String(w), text: "Gruix " + w }); if (w === A.drawWidth) o.selected = true; sel.appendChild(o); });
     sel.addEventListener("change", function () { A.drawWidth = +sel.value; });
     b.appendChild(sel);
     $("toolbar1").hidden = $("toolbar2").hidden = !A.showToolbar;
@@ -592,7 +592,7 @@
   function renderTabs() {
     var c = $("tabs"); c.innerHTML = "";
     A.tabs.forEach(function (t, i) {
-      var x = el("button", { class: "x", title: "Cerrar", text: "✖" });
+      var x = el("button", { class: "x", title: "Tanca", text: "✖" });
       x.addEventListener("click", function (e) { e.stopPropagation(); A.requestClose(i); });
       var tab = el("div", { class: "tab" + (i === A.active ? " on" : "") }, [
         el("span", { text: t.title + (t.dirty ? "*" : "") + (t.mode !== "edit" ? "  ▶" : "") }), x]);
@@ -605,45 +605,45 @@
   var MENUS = function () {
     var t = A.tab(), edit = t.mode === "edit";
     return [
-      ["Archivo", [
-        ["Nuevo", A.newDoc, "⌘N"], ["Abrir...", A.open, "⌘O"], ["Cerrar", function () { A.requestClose(A.active); }],
-        ["Guardar", A.save, "⌘S"], ["Guardar como...", A.saveAs], "-",
-        ["Exportar imagen...", A.exportImage], "-", ["Imprimir...", A.print, "⌘P"], "-",
-        ["Configuración...", A.configDialog]]],
-      ["Editar", [
-        ["Deshacer", A.undo, "⌘Z", !edit], ["Rehacer", A.redo, "⌘Y", !edit], "-",
-        ["Cortar", A.cut, "⌘X", !edit], ["Copiar", A.copy, "⌘C"], ["Pegar", A.paste, "⌘V", !edit], "-",
-        ["Seleccionar todo", A.selectAll, "⌘A"], "-", ["Cajetín...", A.titleDialog]]],
-      ["Dibujar", [
-        ["Redibujar", A.redraw], ["Línea", function () { A.setTool({ t: "shape", kind: "Line" }); }],
-        ["Rectángulo", function () { A.setTool({ t: "shape", kind: "Rect" }); }], ["Elipse", function () { A.setTool({ t: "shape", kind: "Ellipse" }); }],
-        ["Rectángulo coloreado", function () { A.setTool({ t: "shape", kind: "FilledRect" }); }],
-        ["Elipse coloreada", function () { A.setTool({ t: "shape", kind: "FilledEllipse" }); }],
-        ["Texto", function () { A.setTool({ t: "text" }); }], ["Cable", function () { A.setTool({ t: "wire" }); }]]],
-      ["Modo", [
-        ["Edición", A.stopSim], ["Simulación", function () { A.startSim(false); }, "F5"], ["Pausa", A.pause], ["Paso a Paso", A.step],
-        ["Simular documento", function () { A.startSim(false); }], ["Simular todos los documentos", function () { A.startSim(true); }]]],
-      ["Ver", [
+      ["Fitxer", [
+        ["Nou", A.newDoc, "⌘N"], ["Obre...", A.open, "⌘O"], ["Tanca", function () { A.requestClose(A.active); }],
+        ["Desa", A.save, "⌘S"], ["Anomena i desa...", A.saveAs], "-",
+        ["Exporta imatge...", A.exportImage], "-", ["Imprimeix...", A.print, "⌘P"], "-",
+        ["Configuració...", A.configDialog]]],
+      ["Edita", [
+        ["Desfés", A.undo, "⌘Z", !edit], ["Refés", A.redo, "⌘Y", !edit], "-",
+        ["Retalla", A.cut, "⌘X", !edit], ["Copia", A.copy, "⌘C"], ["Enganxa", A.paste, "⌘V", !edit], "-",
+        ["Selecciona-ho tot", A.selectAll, "⌘A"], "-", ["Caixetí...", A.titleDialog]]],
+      ["Dibuixa", [
+        ["Redibuixa", A.redraw], ["Línia", function () { A.setTool({ t: "shape", kind: "Line" }); }],
+        ["Rectangle", function () { A.setTool({ t: "shape", kind: "Rect" }); }], ["El·lipse", function () { A.setTool({ t: "shape", kind: "Ellipse" }); }],
+        ["Rectangle acolorit", function () { A.setTool({ t: "shape", kind: "FilledRect" }); }],
+        ["El·lipse acolorida", function () { A.setTool({ t: "shape", kind: "FilledEllipse" }); }],
+        ["Text", function () { A.setTool({ t: "text" }); }], ["Cable", function () { A.setTool({ t: "wire" }); }]]],
+      ["Mode", [
+        ["Edició", A.stopSim], ["Simulació", function () { A.startSim(false); }, "F5"], ["Pausa", A.pause], ["Pas a pas", A.step],
+        ["Simula el document", function () { A.startSim(false); }], ["Simula tots els documents", function () { A.startSim(true); }]]],
+      ["Visualitza", [
         ["Zoom anterior", A.zoomPrev], ["Zoom normal", function () { A.pushView(); var cr = A.canvasRect(); A.zoomAt(0.75 / A.tab().view.zoom, cr.w / 2, cr.h / 2); }],
         ["Zoom +", function () { A.zoomCenter(1.25); }], ["Zoom -", function () { A.zoomCenter(0.8); }],
-        ["Zoom ventana", function () { A.setTool({ t: "zoomwin" }); }], ["Zoom todo", function () { A.pushView(); A.zoomAll(); }], "-",
-        ["Rejilla", function () { A.grid = !A.grid; renderToolbars(); A.redraw(); }, null, false, A.grid]]],
-      ["Barras", [
-        ["Barra de herramientas", function () { A.showToolbar = !A.showToolbar; renderToolbars(); }, null, false, A.showToolbar],
-        ["Barra de estado", function () { A.showStatus = !A.showStatus; $("statusbar").hidden = !A.showStatus; }, null, false, A.showStatus],
-        ["Barras de símbolos", function () { A.showSymbars = !A.showSymbars; renderCatbar(); renderSymbars(); }, null, false, A.showSymbars], "-"]
+        ["Zoom finestra", function () { A.setTool({ t: "zoomwin" }); }], ["Zoom tot", function () { A.pushView(); A.zoomAll(); }], "-",
+        ["Reixeta", function () { A.grid = !A.grid; renderToolbars(); A.redraw(); }, null, false, A.grid]]],
+      ["Barres", [
+        ["Barra d'eines", function () { A.showToolbar = !A.showToolbar; renderToolbars(); }, null, false, A.showToolbar],
+        ["Barra d'estat", function () { A.showStatus = !A.showStatus; $("statusbar").hidden = !A.showStatus; }, null, false, A.showStatus],
+        ["Barres de símbols", function () { A.showSymbars = !A.showSymbars; renderCatbar(); renderSymbars(); }, null, false, A.showSymbars], "-"]
         .concat(SL.CATS.map(function (c) { return [c.bar, function () { A.cat = c.id; A.showSymbars = true; renderCatbar(); renderSymbars(); }, null, false, A.cat === c.id]; }))],
-      ["Ventana", [["Nueva ventana", A.newDoc], "-"].concat(A.tabs.map(function (tt, i) {
+      ["Finestra", [["Nova finestra", A.newDoc], "-"].concat(A.tabs.map(function (tt, i) {
         return [(i + 1) + " " + tt.title, function () { A.active = i; A.sel.clear(); refreshAll(); }, null, false, i === A.active];
       }))],
-      ["Ayuda", [
-        ["Circuitos de ejemplo", [
-          ["Motor - Arranque directo", function () { A.loadExample(1); }],
-          ["Motor - Inversión de giro", function () { A.loadExample(3); }],
-          ["Motor - Arranque estrella-triángulo", function () { A.loadExample(2); }],
+      ["Ajuda", [
+        ["Circuits d'exemple", [
+          ["Motor - Arrencada directa", function () { A.loadExample(1); }],
+          ["Motor - Inversió de gir", function () { A.loadExample(3); }],
+          ["Motor - Arrencada estrella-triangle", function () { A.loadExample(2); }],
         ]],
         "-",
-        ["Acerca de SimuLAB...", A.about]]],
+        ["Quant a SimuLAB...", A.about]]],
     ];
   };
   function renderMenus() {
@@ -692,7 +692,7 @@
   A.setStatus = setStatus;
   function updateStatus() {
     var t = A.tab();
-    $("mode").textContent = { edit: "Edición", sim: "Simulación", pause: "Pausa" }[t.mode];
+    $("mode").textContent = { edit: "Edició", sim: "Simulació", pause: "Pausa" }[t.mode];
     $("simtime").textContent = t.mode !== "edit" && t.sim ? "t = " + t.sim.time.toFixed(1) + " s" : "";
     $("zoom").textContent = "Zoom " + Math.round(t.view.zoom * 100 / 0.75) + "%";
     $("coords").textContent = A.hover ? "X: " + Math.round(A.hover[0] / 5) + " mm  Y: " + Math.round(A.hover[1] / 5) + " mm" : "";
