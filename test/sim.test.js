@@ -172,15 +172,16 @@ test("crossing conductors do not connect by default; Punt de connexió toggles c
   eq(SL.junctionPoints(d), [], "no dot by default");
   eq(new SL.Sim(d).tick(d, 0.1), null, "no short circuit when crossing without junction");
 
-  // Even if drawn as two collinear segments meeting on the vertical wire, still no connection by default
+  // If a conductor ends on an existing connection point (T-junction), adding another conductor at that point keeps the connection
   const d2 = SL.newDoc();
   SL.makeComp(d2, "FeedL", 150, 60, 0, "");
   SL.makeComp(d2, "FeedN", 60, 150, 3, "");
   SL.addWire(d2, [150, 90], [150, 240]);
   SL.addWire(d2, [90, 150], [150, 150]);
+  eq(SL.isConnectedJunction(d2, [150, 150]), true, "T-junction is connected");
   SL.addWire(d2, [150, 150], [240, 150]);
-  eq(SL.isConnectedJunction(d2, [150, 150]), false, "split crossing not connected by default");
-  eq(new SL.Sim(d2).tick(d2, 0.1), null, "no short circuit on split crossing");
+  eq(SL.isConnectedJunction(d2, [150, 150]), true, "existing connection point is preserved when another conductor ends/starts there");
+  eq(new SL.Sim(d2).tick(d2, 0.1), "Short", "connected junction causes L-N short");
 
   // Click Punt de connexió at (150, 150) -> connects them (L + N = Short)
   const r1 = SL.toggleJunction(d, [150, 150]);

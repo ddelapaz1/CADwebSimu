@@ -419,7 +419,7 @@ SL.cleanJunctions = function (doc) {
   }
 };
 
-SL.addWire = function (doc, a, b) {
+function pushWireRaw(doc, a, b) {
   if (a[0] === b[0] && a[1] === b[1]) return;
   for (var i = 0; i < doc.wires.length; i++) {
     var w = doc.wires[i];
@@ -427,6 +427,22 @@ SL.addWire = function (doc, a, b) {
         (w.a[0] === b[0] && w.a[1] === b[1] && w.b[0] === a[0] && w.b[1] === a[1])) return;
   }
   doc.wires.push({ id: SL.newId(doc), a: [a[0], a[1]], b: [b[0], b[1]] });
+}
+
+function preserveJunctions(doc, prevConnected) {
+  if (!doc.junctions) doc.junctions = [];
+  prevConnected.forEach(function (p) {
+    if (!SL.isConnectedJunction(doc, p) && !SL.hasJunction(doc, p)) {
+      doc.junctions.push([p[0], p[1]]);
+    }
+  });
+}
+
+SL.addWire = function (doc, a, b) {
+  if (a[0] === b[0] && a[1] === b[1]) return;
+  var prevConnected = SL.junctionPoints(doc);
+  pushWireRaw(doc, a, b);
+  preserveJunctions(doc, prevConnected);
 };
 
 SL.chooseRouteMid = function (doc, a, b) {
@@ -447,12 +463,14 @@ SL.chooseRouteMid = function (doc, a, b) {
 
 /** Orthogonal route: straight, or an L (horizontal first unless blocked). */
 SL.addRoute = function (doc, a, b) {
-  if (a[0] === b[0] || a[1] === b[1]) SL.addWire(doc, a, b);
+  var prevConnected = SL.junctionPoints(doc);
+  if (a[0] === b[0] || a[1] === b[1]) pushWireRaw(doc, a, b);
   else {
     var m = SL.chooseRouteMid(doc, a, b);
-    SL.addWire(doc, a, m);
-    SL.addWire(doc, m, b);
+    pushWireRaw(doc, a, m);
+    pushWireRaw(doc, m, b);
   }
+  preserveJunctions(doc, prevConnected);
 };
 
 /**
@@ -747,7 +765,8 @@ SL.moveItems = function (doc, selSet, dx, dy) {
   }
   Object.keys(movedTermMap).forEach(function (k) { addSplitPt(movedTermMap[k].oldPos); });
   Object.keys(statTermMap).forEach(function (k) { addSplitPt(statTermMap[k].pos); });
-  SL.junctionPoints(doc).forEach(addSplitPt);
+  var preMoveConnected = SL.junctionPoints(doc);
+  preMoveConnected.forEach(addSplitPt);
 
   var segments = [];
   (doc.wires || []).forEach(function (w) {
@@ -1029,7 +1048,11 @@ SL.moveItems = function (doc, selSet, dx, dy) {
 
   // Rebuild doc.wires from staticWires
   doc.wires = [];
-  staticWires.forEach(function (w) { SL.addWire(doc, w.a, w.b); });
+  staticWires.forEach(function (w) { pushWireRaw(doc, w.a, w.b); });
+  var postMoveConnected = preMoveConnected.map(function (p) {
+    return anchorMoves[key(p)] ? [p[0] + dx, p[1] + dy] : [p[0], p[1]];
+  });
+  preserveJunctions(doc, postMoveConnected);
   SL.cleanJunctions(doc);
 
   return { disconnected: disconnected, names: disconnectedNames };
