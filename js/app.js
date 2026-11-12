@@ -1052,6 +1052,7 @@
     });
   }
   function openMenu(name) {
+    if (A.openCat || A.radialMenu) A.closeSymDeploy();
     renderMenus();
     var w = $("menubar").querySelector(".menu[data-name='" + name + "']");
     if (w) w.classList.add("open");
