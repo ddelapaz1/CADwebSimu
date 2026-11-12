@@ -35,13 +35,17 @@
     var drivers = sim ? sim.drivers(doc) : null;
     doc.comps.forEach(function (c) {
       var K = SL.KINDS[c.kind], vis = {}, color = "#000", extra = null;
+      if (c.kind === "PushBtn") vis.btnColor = SL.rgb(SL.LAMP_COLORS[c.color] || SL.LAMP_COLORS.Verde);
       if (sim) {
         var st = sim.s(c.id);
         vis.closed = sim.closed(c, drivers);
+        vis.pos = st.pos || 0;
         if (K.role === "Load") {
           vis.active = st.energized || st.on;
-          if (c.kind === "Lamp" && st.energized) vis.lamp = SL.rgb(SL.LAMP_COLORS[c.color] || SL.LAMP_COLORS.Verde);
-          if (c.kind === "Buzzer" || c.kind === "Horn") vis.active = st.energized;
+          if ((c.kind === "Lamp" || c.kind === "LampFlash") && (c.kind === "Lamp" ? st.energized : st.on)) {
+            vis.lamp = SL.rgb(SL.LAMP_COLORS[c.color] || SL.LAMP_COLORS.Verde);
+          }
+          if (["Bell", "Buzzer", "Siren", "Horn"].indexOf(c.kind) >= 0) vis.active = st.energized;
           vis.motor = st.motor; vis.conn = st.conn; vis.angle = st.angle;
           if (K.timer && (st.energized || st.on) && !(c.kind === "TimerOnOff" && st.energized === st.on)) {
             var rem = c.kind === "TimerOn" && st.on ? 0 : Math.max(0, SL.presetSecs(c) - st.t);

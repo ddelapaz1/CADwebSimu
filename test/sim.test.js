@@ -232,5 +232,14 @@ test("moving connected element to impossible position deletes wire and reports d
   eq(d.wires.length, 0, "conductor was removed");
 });
 
+test("all registered symbols in SL.KIND_LIST build valid geometry", () => {
+  SL.KIND_LIST.forEach((k) => {
+    const sym = SL.buildSymbol(k.id, {});
+    eq(sym.prims.length > 0, true, "symbol has prims: " + k.id);
+    const symOn = SL.buildSymbol(k.id, { closed: true, active: true, motor: 1 });
+    eq(symOn.prims.length > 0, true, "active symbol has prims: " + k.id);
+  });
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");

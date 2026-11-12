@@ -294,10 +294,10 @@
   };
   A.defaultName = function (kind) {
     var doc = A.tab().doc, K = SL.KINDS[kind];
-    if (K.role === "Feed") return "";
+    if (K.role === "Feed" && !K.prefix) return "";
     if (K.role === "Contact" || K.role === "Poles") {
       var want = function (k) {
-        if (kind === "ThermalNO" || kind === "ThermalNC") return k === "ThermalRelay3";
+        if (kind.indexOf("Thermal") === 0) return k === "ThermalRelay3";
         if (kind.indexOf("Timed") === 0) return SL.KINDS[k].timer;
         return k === "Coil" || k === "StepRelay" || SL.KINDS[k].timer;
       };
@@ -472,13 +472,13 @@
       mult = radios("mult", [[0.1, "x 0,1 Seg"], [1, "x 1 Seg"], [10, "x 10 Seg"], [60, "x 60 Seg"]], c.time_mult);
       body.push(el("div", {}, [el("div", { text: "Temporització" }), el("div", { class: "radios" }, [base, mult])]));
     }
-    if (c.kind === "Lamp") {
+    if (c.kind === "Lamp" || c.kind === "LampFlash" || c.kind === "PushBtn") {
       color = radios("color", SL.LAMP_COLOR_OPTIONS || Object.keys(SL.LAMP_COLORS).map(function (k) { return [k, k]; }), c.color);
       body.push(el("div", {}, [el("div", { text: "Color" }), color]));
     }
     if (K.role === "Contact" || K.role === "Poles") body.push(el("div", { class: "hint", text: "Els contactes segueixen la bobina, temporitzador o relé tèrmic amb el mateix nom." }));
     if (K.role === "Actuator") body.push(el("div", { class: "hint", text: "Tots els accionaments amb el mateix nom es mouen alhora." }));
-    var title = K.timer ? "Temporitzadors" : c.kind === "Lamp" ? "Indicador color" : "Edita";
+    var title = K.timer ? "Temporitzadors" : (c.kind === "Lamp" || c.kind === "LampFlash" || c.kind === "PushBtn") ? "Indicador color" : "Edita";
     dialog(title, body, [["D'acord", function () {
       A.checkpoint();
       c.name = name.value.trim(); c.func = func.value;
@@ -913,7 +913,7 @@
       });
     } else if (A.deployMode === "grid") {
       var n = items.length;
-      var cols = n <= 3 ? n : n === 4 ? 2 : n <= 9 ? 3 : 4;
+      var cols = n <= 3 ? n : n === 4 ? 2 : n <= 9 ? 3 : n <= 16 ? 4 : 5;
       var gw = cols * 42 + (cols - 1) * 6 + 20;
       var gLeft = Math.max(8, Math.min(window.innerWidth - gw - 8, Math.round(bx - gw / 2)));
       var gTop = Math.round(barRect.bottom + 5);

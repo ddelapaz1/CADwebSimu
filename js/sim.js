@@ -45,7 +45,13 @@
     return [0, 0];
   };
 
-  function peTerminal(kind) { return kind === "Motor3" ? 3 : kind === "Motor3YD" ? 6 : -1; }
+  function peTerminal(kind) {
+    if (kind === "Motor3") return 3;
+    if (kind === "Motor3YD") return 6;
+    if (kind === "Surge1N") return 2;
+    if (kind === "Surge3N") return 4;
+    return -1;
+  }
 
   function Dsu(n) { this.p = []; for (var i = 0; i < n; i++) this.p.push(i); }
   Dsu.prototype.find = function (x) { while (this.p[x] !== x) { this.p[x] = this.p[this.p[x]]; x = this.p[x]; } return x; };
@@ -163,7 +169,10 @@
     doc.comps.forEach(function (c) {
       if (!c.name) return;
       var st = self.s(c.id), on = null;
-      if (["Coil", "TimerOn", "TimerOff", "TimerOnOff", "Flasher", "StepRelay"].indexOf(c.kind) >= 0) on = st.on;
+      if (["Coil", "LatchCoil", "StepRelay", "Solenoid", "TimerOn", "TimerOff", "TimerOnOff", "Flasher",
+        "PulseGen", "TimeSwitch", "Counter", "SoftCtrl", "SoftRevCtrl", "VfdACCtrl", "DriveDCCtrl",
+        "SsrDC", "SsrAC", "PhaseLossN", "PhaseLoss", "PhaseSeqN", "PhaseSeq",
+        "CoilContactNO", "CoilContactCO"].indexOf(c.kind) >= 0) on = st.on;
       else if (c.kind === "ThermalRelay3") on = st.act;
       if (on !== null) m[c.name] = !!(m[c.name] || on);
     });
@@ -190,9 +199,55 @@
     var drivers = this.drivers(doc);
     doc.comps.forEach(function (c) {
       var K = SL.KINDS[c.kind];
+      var t = topo.terms[c.id];
+      if (c.kind === "SsrDC" || c.kind === "SsrAC") {
+        if (self.s(c.id).on && t.length >= 2) d.union(t[0], t[1]);
+        return;
+      }
+      if (c.kind === "CoilContactNO") {
+        if (self.s(c.id).on && t.length >= 4) d.union(t[2], t[3]);
+        return;
+      }
+      if (c.kind === "CoilContactCO") {
+        var ccOn = self.s(c.id).on;
+        if (!ccOn && t.length >= 4) d.union(t[2], t[3]);
+        if (ccOn && t.length >= 5) d.union(t[2], t[4]);
+        return;
+      }
       if (["Passive", "Manual", "Poles", "Contact", "Actuator"].indexOf(K.role) < 0) return;
-      if (!self.closed(c, drivers)) return;
-      var t = topo.terms[c.id], np = K.poles > 0 ? K.poles : 1;
+      var isClosed = self.closed(c, drivers);
+      if (c.kind === "CrossSw") {
+        if (t.length >= 4) {
+          if (isClosed) { d.union(t[0], t[2]); d.union(t[1], t[3]); }
+          else { d.union(t[0], t[3]); d.union(t[1], t[2]); }
+        }
+        return;
+      }
+      if (c.kind === "Sel102") {
+        var pos102 = self.s(c.id).pos || (isClosed ? 1 : 0);
+        if (pos102 === 1 && t.length >= 2) d.union(t[0], t[1]);
+        else if (pos102 === 2 && t.length >= 3) d.union(t[0], t[2]);
+        return;
+      }
+      if (c.kind === "Sel123") {
+        var pos123 = self.s(c.id).pos || (isClosed ? 1 : 0);
+        if (pos123 === 0 && t.length >= 2) d.union(t[0], t[1]);
+        else if (pos123 === 1 && t.length >= 3) d.union(t[0], t[2]);
+        else if (pos123 === 2 && t.length >= 4) d.union(t[0], t[3]);
+        return;
+      }
+      if (c.kind.slice(-4) === "NONC") {
+        if (!isClosed && t.length >= 2) d.union(t[0], t[1]);
+        if (isClosed && t.length >= 4) d.union(t[2], t[3]);
+        return;
+      }
+      if (c.kind.slice(-2) === "CO") {
+        if (!isClosed && t.length >= 2) d.union(t[0], t[1]);
+        if (isClosed && t.length >= 3) d.union(t[0], t[2]);
+        return;
+      }
+      if (!isClosed) return;
+      var np = K.poles > 0 ? K.poles : 1;
       for (var i = 0; i < np; i++) if (2 * i + 1 < t.length) d.union(t[2 * i], t[2 * i + 1]);
     });
     var mask = new Array(n).fill(0);
@@ -202,6 +257,39 @@
       var t = topo.terms[c.id];
       K.feed.forEach(function (f, i) { if (i < t.length) mask[d.find(t[i])] |= f[0]; });
     });
+    for (var pass = 0; pass < 4; pass++) {
+      var convAdded = false;
+      doc.comps.forEach(function (c) {
+        if (SL.KINDS[c.kind].role !== "Converter") return;
+        var t = topo.terms[c.id], st = self.s(c.id);
+        var p0 = t[0] != null ? single(mask[d.find(t[0])]) : 0;
+        var p1 = t[1] != null ? single(mask[d.find(t[1])]) : 0;
+        var p2 = t[2] != null ? single(mask[d.find(t[2])]) : 0;
+        var addPot = function (termIdx, potBit) {
+          if (termIdx >= t.length) return;
+          var r = d.find(t[termIdx]);
+          if ((mask[r] & potBit) === 0) { mask[r] |= potBit; convAdded = true; }
+        };
+        if (c.kind === "Transformer1") {
+          var ok1 = validPair(p0, p1);
+          st.energized = st.on = ok1;
+          if (ok1) { addPot(2, P.L1); addPot(3, P.N); }
+        } else if (c.kind === "Transformer3") {
+          var ok3 = orderDir(p0, p1, p2) !== 0;
+          st.energized = st.on = ok3;
+          if (ok3) { addPot(3, p0); addPot(4, p1); addPot(5, p2); }
+        } else if (c.kind === "PowerSupply1" || c.kind === "Rectifier") {
+          var okPs1 = validPair(p0, p1);
+          st.energized = st.on = okPs1;
+          if (okPs1) { addPot(2, P.POS); addPot(3, P.NEG); }
+        } else if (c.kind === "PowerSupply3") {
+          var okPs3 = orderDir(p0, p1, p2) !== 0;
+          st.energized = st.on = okPs3;
+          if (okPs3) { addPot(3, P.POS); addPot(4, P.NEG); }
+        }
+      });
+      if (!convAdded) break;
+    }
     var out = [], roots = [], fault = null, i;
     for (i = 0; i < n; i++) { roots.push(d.find(i)); out.push(mask[roots[i]]); }
     out.forEach(function (m) {
@@ -249,8 +337,11 @@
       } else if (c.kind === "TimerOff") {
         if (st.energized) { st.t = 0; st.on = true; }
         else if (st.on) { st.t += dt; if (st.t >= preset) { st.on = false; st.t = 0; } }
-      } else if (c.kind === "Flasher") {
+      } else if (c.kind === "Flasher" || c.kind === "PulseGen") {
         if (st.energized) { st.t += dt; if (st.t >= Math.max(preset, 0.05)) { st.t = 0; st.on = !st.on; } }
+        else { st.t = 0; st.on = false; }
+      } else if (c.kind === "LampFlash") {
+        if (st.energized) { st.t += dt; if (st.t >= 0.4) { st.t = 0; st.on = !st.on; } }
         else { st.t = 0; st.on = false; }
       }
       if (st.motor) {
@@ -277,16 +368,34 @@
         } else if (c.kind === "Motor1") {
           var e1 = pots.length === 2 && validPair(pots[0], pots[1]);
           st.energized = e1; st.motor = e1 ? 1 : 0;
+        } else if (c.kind === "SsrDC" || c.kind === "SsrAC") {
+          var eSsr = pots.length >= 4 && validPair(pots[2], pots[3]);
+          st.energized = eSsr;
+          if (eSsr !== st.on) { st.on = eSsr; changed = true; }
+        } else if (c.kind === "PhaseLoss" || c.kind === "PhaseLossN" || c.kind === "PhaseSeq" || c.kind === "PhaseSeqN") {
+          var pDir = pots.length >= 3 ? orderDir(pots[0], pots[1], pots[2]) : 0;
+          var nOk = (c.kind === "PhaseLossN" || c.kind === "PhaseSeqN") ? (pots[3] === P.N) : true;
+          var phOk = (c.kind === "PhaseSeq" || c.kind === "PhaseSeqN") ? (pDir === 1 && nOk) : (pDir !== 0 && nOk);
+          st.energized = phOk;
+          if (phOk !== st.on) { st.on = phOk; changed = true; }
+        } else if (c.kind === "LatchCoil") {
+          var eSet = pots.length >= 3 && validPair(pots[0], pots[2]);
+          var eRst = pots.length >= 3 && validPair(pots[1], pots[2]);
+          st.energized = eSet || eRst;
+          var lOn = st.on;
+          if (eRst) lOn = false;
+          else if (eSet) lOn = true;
+          if (lOn !== st.on) { st.on = lOn; changed = true; }
         } else {
-          var e = pots.length === 2 && validPair(pots[0], pots[1]);
+          var e = pots.length >= 2 && validPair(pots[0], pots[1]);
           st.energized = e;
           var on = st.on;
           switch (c.kind) {
-            case "Coil": on = e; break;
+            case "Coil": case "Solenoid": case "TimeSwitch": on = e; break;
             case "TimerOn": on = e && st.on; break;
             case "TimerOff": on = e || st.on; break;
             case "TimerOnOff": on = st.on; break;
-            case "Flasher": on = e && st.on; break;
+            case "Flasher": case "PulseGen": case "LampFlash": on = e && st.on; break;
             case "StepRelay":
               if (e && !st.prev && !toggled[c.id]) { toggled[c.id] = true; on = !st.on; }
               break;
@@ -306,8 +415,13 @@
     var c = doc.comps.find(function (x) { return x.id === id; });
     if (!c) return;
     var role = SL.KINDS[c.kind].role, self = this;
+    var nextPos = ((self.s(id).pos || 0) + 1) % 3;
     doc.comps.forEach(function (o) {
-      if (o.id === id || (c.name && o.name === c.name && SL.KINDS[o.kind].role === role)) self.s(o.id).act = value;
+      if (o.id === id || (c.name && o.name === c.name && SL.KINDS[o.kind].role === role)) {
+        var st = self.s(o.id);
+        st.act = value;
+        if (o.kind === "Sel102" || o.kind === "Sel123") st.pos = nextPos;
+      }
     });
   };
 
@@ -315,9 +429,18 @@
 
   SL.clickKind = function (kind) {
     // momentary: push buttons, mushroom buttons, limit switches (sub_43ee20 / sub_45fe10)
-    if (["PushNO", "PushNC", "MushroomNO", "MushroomNC", "LimitNO", "LimitNC"].indexOf(kind) >= 0) return "momentary";
-    if (["SwitchNO", "SwitchNC", "Breaker1", "Breaker2",
-      "Breaker3", "Switch2", "Switch3", "ThermalRelay3"].indexOf(kind) >= 0) return "toggle";
+    if (["PushBtn", "PushNO", "PushNC", "PushNONC", "PushCO",
+      "MushroomNO", "MushroomNC", "MushroomNONC", "MushroomCO",
+      "LimitNO", "LimitNC", "LimitNONC", "LimitCO",
+      "DetIndNO", "DetIndNC", "DetCapNO", "DetCapNC", "DetMagNO", "DetMagNC",
+      "PhotoBarrier", "PhotoRecNO", "PhotoRecNC",
+      "PressNO", "PressNC", "VacNO", "VacNC", "ThermoNO", "ThermoNC"].indexOf(kind) >= 0) return "momentary";
+    if (["SwitchNO", "SwitchNC", "SwitchNONC", "SwitchCO", "Sel102", "Sel123", "CrossSw",
+      "Auto1", "Auto1N", "Auto2", "Auto3", "Auto3N",
+      "Rcd1N", "Rcd3N", "Breaker1", "Breaker1N", "Breaker2",
+      "Breaker3", "Breaker3N", "PermOvervolt1N", "PermOvervolt3N",
+      "Switch1", "Switch2", "Switch3", "Switch4", "ThermalRelay3",
+      "FuseSw1", "FuseSw1N", "FuseSw2", "FuseSw3", "FuseSw3N"].indexOf(kind) >= 0) return "toggle";
     return null;
   };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);
