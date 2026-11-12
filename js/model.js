@@ -709,7 +709,6 @@ SL.routeOrthogonal = function (doc, pA, pB, opts) {
  */
 SL.moveItems = function (doc, selSet, dx, dy) {
   if (!dx && !dy) return { disconnected: false, names: [] };
-  var key = function (p) { return p[0] + "," + p[1]; };
   var movedComps = doc.comps.filter(function (c) { return selSet.has(c.id); });
 
   if (!movedComps.length) {
@@ -732,15 +731,58 @@ SL.moveItems = function (doc, selSet, dx, dy) {
     return { disconnected: false, names: [] };
   }
 
-  // Record old terminal positions and outward directions before moving components
+  return transformItems(doc, selSet, movedComps, {
+    shiftPt: function (p) { return [p[0] + dx, p[1] + dy]; },
+    applyTransform: function () {
+      doc.comps.forEach(function (c) { if (selSet.has(c.id)) { c.x += dx; c.y += dy; } });
+      doc.texts.forEach(function (x) { if (selSet.has(x.id)) { x.x += dx; x.y += dy; } });
+      doc.drawings.forEach(function (x) {
+        if (selSet.has(x.id)) {
+          x.a = [x.a[0] + dx, x.a[1] + dy];
+          x.b = [x.b[0] + dx, x.b[1] + dy];
+        }
+      });
+    },
+  });
+};
+
+/**
+ * Rotate or mirror selected components in doc, redrawing orthogonal connections (90° turns only)
+ * for any connected element that transforms. If a connection cannot be remade, its wire is removed
+ * and { disconnected: true, names: [...] } is returned.
+ */
+SL.rotateItems = function (doc, selSet, delta, mirror) {
+  var normDelta = (((delta || 0) % 4) + 4) % 4;
+  if (!mirror && normDelta === 0) return { disconnected: false, names: [] };
+  var movedComps = doc.comps.filter(function (c) { return selSet.has(c.id); });
+  if (!movedComps.length) return { disconnected: false, names: [] };
+
+  return transformItems(doc, selSet, movedComps, {
+    shiftPt: null,
+    applyTransform: function () {
+      movedComps.forEach(function (c) {
+        if (mirror) c.mirror = !c.mirror;
+        else c.rot = (((c.rot || 0) + normDelta) % 4 + 4) % 4;
+      });
+    },
+  });
+};
+
+function transformItems(doc, selSet, movedComps, opts) {
+  var key = function (p) { return p[0] + "," + p[1]; };
+  var shiftPt = opts.shiftPt;
+
+  // Record old terminal positions before transforming components
+  var oldMovedTerms = [];
   var movedTermMap = {}, statTermMap = {};
   doc.comps.forEach(function (c) {
     var tds = SL.terminalsWithDir(c);
     if (selSet.has(c.id)) {
+      oldMovedTerms.push({ comp: c, tds: tds });
       tds.forEach(function (td) {
         movedTermMap[key(td.pos)] = {
           oldPos: td.pos,
-          newPos: [td.pos[0] + dx, td.pos[1] + dy],
+          newPos: shiftPt ? shiftPt(td.pos) : td.pos,
           dir: td.dir,
           comp: c,
         };
@@ -889,19 +931,24 @@ SL.moveItems = function (doc, selSet, dx, dy) {
     group.forEach(function (ak) {
       if (statTermMap[ak]) anchorMoves[ak] = false;
       else if (movedTermMap[ak]) anchorMoves[ak] = true;
-      else anchorMoves[ak] = hasMoved && !hasStat;
+      else anchorMoves[ak] = shiftPt ? (hasMoved && !hasStat) : false;
     });
   });
 
-  // Move selected components, texts, drawings
-  doc.comps.forEach(function (c) { if (selSet.has(c.id)) { c.x += dx; c.y += dy; } });
-  doc.texts.forEach(function (x) { if (selSet.has(x.id)) { x.x += dx; x.y += dy; } });
-  doc.drawings.forEach(function (x) {
-    if (selSet.has(x.id)) {
-      x.a = [x.a[0] + dx, x.a[1] + dy];
-      x.b = [x.b[0] + dx, x.b[1] + dy];
-    }
-  });
+  // Transform selected components (and texts/drawings if moving)
+  opts.applyTransform();
+  if (!shiftPt) {
+    oldMovedTerms.forEach(function (entry) {
+      var newTds = SL.terminalsWithDir(entry.comp);
+      entry.tds.forEach(function (oldTd, idx) {
+        var mt = movedTermMap[key(oldTd.pos)];
+        if (mt && newTds[idx]) {
+          mt.newPos = newTds[idx].pos;
+          mt.dir = newTds[idx].dir;
+        }
+      });
+    });
+  }
 
   // Check if any moved component collides with another component or is out of page bounds
   var ps = (SL.PAGE_SIZES && doc.page && SL.PAGE_SIZES[doc.page.size]) || { w: 1485, h: 1050 };
@@ -965,9 +1012,9 @@ SL.moveItems = function (doc, selSet, dx, dy) {
       recordDisconnect(uComp || vComp);
       return;
     }
-    var shiftedPts = ch.pts.map(function (p) { return [p[0] + dx, p[1] + dy]; });
-    // Check if shifted path collides with any stationary component/terminal/wire
-    var pA = shiftedPts[0], pB = shiftedPts[shiftedPts.length - 1];
+    var shiftedPts = shiftPt ? ch.pts.map(shiftPt) : null;
+    var pA = uTerm ? uTerm.newPos : shiftedPts[0];
+    var pB = vTerm ? vTerm.newPos : shiftedPts[shiftedPts.length - 1];
     var routed = SL.routeOrthogonal(doc, pA, pB, {
       dirA: uTerm ? uTerm.dir : null,
       dirB: vTerm ? vTerm.dir : null,
@@ -978,16 +1025,18 @@ SL.moveItems = function (doc, selSet, dx, dy) {
       recordDisconnect(uComp || vComp);
       return;
     }
-    // Keep shiftedPts if all segments are orthogonal and valid, else use routed
-    var usePts = shiftedPts;
-    var okShift = true;
-    for (var i = 0; i < shiftedPts.length - 1; i++) {
-      var a = shiftedPts[i], b = shiftedPts[i + 1];
-      if (a[0] !== b[0] && a[1] !== b[1]) { okShift = false; break; }
-      var segCheck = SL.routeOrthogonal(doc, a, b, { wires: staticWires, comps: doc.comps });
-      if (!segCheck || segCheck.length !== 2) { okShift = false; break; }
+    var usePts = routed;
+    if (shiftedPts) {
+      // Keep shiftedPts if all segments are orthogonal and valid, else use routed
+      var okShift = true;
+      for (var i = 0; i < shiftedPts.length - 1; i++) {
+        var a = shiftedPts[i], b = shiftedPts[i + 1];
+        if (a[0] !== b[0] && a[1] !== b[1]) { okShift = false; break; }
+        var segCheck = SL.routeOrthogonal(doc, a, b, { wires: staticWires, comps: doc.comps });
+        if (!segCheck || segCheck.length !== 2) { okShift = false; break; }
+      }
+      if (okShift) usePts = shiftedPts;
     }
-    if (!okShift) usePts = routed;
     for (var k = 0; k < usePts.length - 1; k++) {
       staticWires.push({ a: usePts[k], b: usePts[k + 1] });
     }
@@ -1005,7 +1054,7 @@ SL.moveItems = function (doc, selSet, dx, dy) {
       var sTerm = statTermMap[sKey];
       var mComp = mTerm ? mTerm.comp : null;
       var pStat = ptByKey[sKey];
-      var pMoved = mTerm ? mTerm.newPos : [ptByKey[mKey][0] + dx, ptByKey[mKey][1] + dy];
+      var pMoved = mTerm ? mTerm.newPos : (shiftPt ? shiftPt(ptByKey[mKey]) : ptByKey[mKey]);
       if (mComp && invalidMovedComp[mComp.id]) {
         disc++;
         discComps.push(mComp);
@@ -1050,13 +1099,13 @@ SL.moveItems = function (doc, selSet, dx, dy) {
   doc.wires = [];
   staticWires.forEach(function (w) { pushWireRaw(doc, w.a, w.b); });
   var postMoveConnected = preMoveConnected.map(function (p) {
-    return anchorMoves[key(p)] ? [p[0] + dx, p[1] + dy] : [p[0], p[1]];
+    return (shiftPt && anchorMoves[key(p)]) ? shiftPt(p) : [p[0], p[1]];
   });
   preserveJunctions(doc, postMoveConnected);
   SL.cleanJunctions(doc);
 
   return { disconnected: disconnected, names: disconnectedNames };
-};
+}
 
 SL.nextName = function (doc, kind) {
   var p = SL.KINDS[kind].prefix;

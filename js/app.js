@@ -289,8 +289,12 @@
     var t = A.tab(), cs = t.doc.comps.filter(function (c) { return A.sel.has(c.id); });
     if (t.mode !== "edit" || !cs.length) return;
     A.checkpoint();
-    cs.forEach(function (c) { if (mirror) c.mirror = !c.mirror; else c.rot = (c.rot + delta) % 4; });
+    var res = SL.rotateItems(t.doc, A.sel, delta, mirror);
     A.changed();
+    if (res && res.disconnected) {
+      var suffix = res.names && res.names.length ? " (" + res.names.join(", ") + ")" : "";
+      A.message("No s'ha pogut reconnectar l'element en girar-lo i s'ha deixat desconnectat" + suffix + ".");
+    }
   };
   A.defaultName = function (kind) {
     var doc = A.tab().doc, K = SL.KINDS[kind];

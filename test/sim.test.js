@@ -233,6 +233,42 @@ test("moving connected element to impossible position deletes wire and reports d
   eq(d.wires.length, 0, "conductor was removed");
 });
 
+test("rotating connected element redraws wire with 90° turns only", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedL", 300, 120, 0, ""); // terminal at (300, 150)
+  const lamp = SL.makeComp(d, "Lamp", 300, 210, 0, "-H1"); // terminals at (300, 210) and (300, 270)
+  SL.makeComp(d, "FeedN", 300, 360, 2, ""); // terminal at (300, 330)
+  SL.addWire(d, [300, 150], [300, 210]);
+  SL.addWire(d, [300, 270], [300, 330]);
+
+  // Rotate lamp 90° clockwise: terminals become (300, 210) and (240, 210)
+  const res = SL.rotateItems(d, new Set([lamp.id]), 1, false);
+  eq(res.disconnected, false, "connection remade on rotate");
+  eq(lamp.rot, 1, "lamp rotated");
+  eq(d.wires.length > 0, true, "wires exist");
+  d.wires.forEach((w) => {
+    const orthogonal = w.a[0] === w.b[0] || w.a[1] === w.b[1];
+    eq(orthogonal, true, "segment is orthogonal: " + JSON.stringify(w));
+  });
+  const s = new SL.Sim(d);
+  eq(s.tick(d, 0.1), null);
+  eq(s.st[lamp.id].energized, true, "lamp remains energized after rotate reroute");
+});
+
+test("rotating connected element to impossible orientation deletes wire and reports disconnection", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedL", 300, 120, 0, ""); // terminal at (300, 150)
+  const fuse = SL.makeComp(d, "Fuse1", 300, 210, 0, "-F1"); // terminals at (300, 210), (300, 270)
+  SL.addWire(d, [300, 150], [300, 210]);
+
+  // Rotate fuse 180°: second terminal moves to (300, 150), colliding with FeedL terminal
+  const res = SL.rotateItems(d, new Set([fuse.id]), 2, false);
+  eq(res.disconnected, true, "reports disconnection on impossible rotate");
+  eq(res.names, ["-F1"], "reports component name");
+  eq(fuse.rot, 2, "fuse remains rotated");
+  eq(d.wires.length, 0, "conductor was removed");
+});
+
 test("all registered symbols in SL.KIND_LIST build valid geometry", () => {
   SL.KIND_LIST.forEach((k) => {
     const sym = SL.buildSymbol(k.id, {});
