@@ -3,7 +3,7 @@
 Editor i simulador d'esquemes elèctrics de comandament i potència que funciona al navegador
 (HTML, CSS i JavaScript, sense instal·lar res).
 
-**Obrir:** https://ddelapaz1.github.io/SimuLAB/
+**Obrir:** https://ddelapaz1.github.io/CADwebSimu/
 
 ## Què fa
 - Dibuixar esquemes amb alimentacions, fusibles, automàtics, relés tèrmics, contactors,
