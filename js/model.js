@@ -970,6 +970,8 @@ function transformItems(doc, selSet, movedComps, opts) {
     var mTerms = SL.terminals(mc);
     doc.comps.forEach(function (oc) {
       if (oc.id === mc.id) return;
+      // a translated group keeps its internal layout: only check against what stays still
+      if (shiftPt && selSet.has(oc.id)) return;
       var oob = SL.compObstacleRect(oc);
       if (mob.x0 <= oob.x1 && mob.x1 >= oob.x0 && mob.y0 <= oob.y1 && mob.y1 >= oob.y0) {
         invalidMovedComp[mc.id] = true;
@@ -1013,6 +1015,12 @@ function transformItems(doc, selSet, movedComps, opts) {
 
   // Handle chains where both endpoints move together
   bothMovedChains.forEach(function (ch) {
+    if (shiftPt) {
+      // both ends travel with the selection: the conductor is translated as it is
+      var moved = ch.pts.map(shiftPt);
+      for (var m = 0; m < moved.length - 1; m++) staticWires.push({ a: moved[m], b: moved[m + 1] });
+      return;
+    }
     var uTerm = movedTermMap[ch.u], vTerm = movedTermMap[ch.v];
     var uComp = uTerm && uTerm.comp, vComp = vTerm && vTerm.comp;
     if ((uComp && invalidMovedComp[uComp.id]) || (vComp && invalidMovedComp[vComp.id])) {

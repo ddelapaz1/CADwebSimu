@@ -407,5 +407,22 @@ test("overload relay trips when the motor runs on two phases", () => {
   eq(s.events.some((e) => /tèrmic/.test(e)), true);
 });
 
+test("moving a whole block with its conductors keeps every conductor", () => {
+  const d = SL.exampleRevDoc();
+  const len = (ws) => ws.reduce((a, w) => a + Math.abs(w.a[0] - w.b[0]) + Math.abs(w.a[1] - w.b[1]), 0);
+  const x0 = Math.min(...d.comps.filter((c) => c.kind === "Coil").map((c) => c.x)) - 40;
+  const sel = new Set();
+  d.comps.forEach((c) => { if (SL.compRect(c).x0 >= x0) sel.add(c.id); });
+  d.wires.forEach((w) => { if (Math.min(w.a[0], w.b[0]) >= x0) sel.add(w.id); });
+  const before = len(d.wires);
+  const res = SL.moveItems(d, sel, -150, -60);
+  eq(res.disconnected, false, "nothing disconnected");
+  eq(len(d.wires), before, "same total conductor length");
+  const s = new SL.Sim(d), id = (k, n) => d.comps.find((c) => c.kind === k && c.name === n).id;
+  eq(s.tick(d, 0.1), null);
+  s.setActuator(d, id("PushNO", "-S1"), true); s.tick(d, 0.1); s.setActuator(d, id("PushNO", "-S1"), false); s.tick(d, 0.1);
+  eq(s.st[id("Motor3", "-M1")].motor, 1, "moved control circuit still works");
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");
