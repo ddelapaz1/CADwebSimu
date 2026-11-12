@@ -5,14 +5,86 @@
   var APP = "CADwebSimu";
   var STEP_SECS = 0.1; // "Paso a paso" advance (estimated, as in the Mac app)
   var STORE = "simulab.tabs.v1";
+  var PREF_STORE = "simulab.prefs.v1";
+
+  var DEPLOY_MODES = [
+    ["grid", "En quadrícula", "⊞"],
+    ["down", "Cap avall", "⇣"],
+    ["circle", "En cercle", "◎"],
+  ];
 
   var A = SL.app = {
     tabs: [], active: 0, tool: { t: "select" }, placeRot: 0, placeMirror: false, cat: "Feeds",
+    openCat: null, radialMenu: null, deployMode: "grid",
     sel: new Set(), drag: null, wireFrom: null, hover: null, clip: null, pasteN: 0,
     grid: true, showToolbar: true, showStatus: true, showSymbars: true,
     drawColor: [0, 0, 0], fillColor: [255, 255, 200], drawWidth: 1, docCounter: 1,
     pressed: null, lastT: null, needsDraw: true, dialogOpen: false,
   };
+
+  var supportsDisplayTransition;
+  function canTransitionDisplay() {
+    if (supportsDisplayTransition !== undefined) return supportsDisplayTransition;
+    if (!window.CSS || !window.CSS.supports || !window.CSS.supports("transition-behavior", "allow-discrete") || !document.body) {
+      return false;
+    }
+    var probe = document.createElement("div");
+    probe.style.cssText = "transition: display 1s allow-discrete !important; display: block;";
+    document.body.appendChild(probe);
+    getComputedStyle(probe).display;
+    probe.style.display = "none";
+    supportsDisplayTransition = getComputedStyle(probe).display === "block";
+    probe.remove();
+    return supportsDisplayTransition;
+  }
+
+  function hideElement(node, onDone) {
+    if (!node || node.hidden) { if (onDone) onDone(); return; }
+    if (canTransitionDisplay()) {
+      node.hidden = true;
+    } else {
+      node.setAttribute("data-closing", "");
+    }
+    var animations = node.getAnimations ? node.getAnimations({ subtree: true }) : [];
+    if (animations.length > 0) {
+      Promise.race([
+        Promise.allSettled(animations.map(function (a) { return a.finished; })),
+        new Promise(function (r) { setTimeout(r, 450); }),
+      ]).then(function () {
+        if (node.hasAttribute("data-closing")) {
+          node.removeAttribute("data-closing");
+          node.hidden = true;
+        }
+        if (onDone) onDone();
+      });
+    } else {
+      if (node.hasAttribute("data-closing")) {
+        node.removeAttribute("data-closing");
+        node.hidden = true;
+      }
+      if (onDone) onDone();
+    }
+  }
+
+  function showElement(node) {
+    if (!node) return;
+    node.removeAttribute("data-closing");
+    node.hidden = false;
+  }
+
+  function savePrefs() {
+    try {
+      localStorage.setItem(PREF_STORE, JSON.stringify({ deployMode: A.deployMode }));
+    } catch (e) { /* storage full or blocked */ }
+  }
+  function loadPrefs() {
+    try {
+      var p = JSON.parse(localStorage.getItem(PREF_STORE) || "null");
+      if (p && DEPLOY_MODES.some(function (m) { return m[0] === p.deployMode; })) {
+        A.deployMode = p.deployMode;
+      }
+    } catch (e) { /* ignore */ }
+  }
 
   function $(id) { return document.getElementById(id); }
   function el(tag, attrs, kids) {
@@ -256,12 +328,13 @@
       select: "Preparat",
     }[t.t] || (SL.KINDS[t.kind] ? SL.KINDS[t.kind].label + ": feu clic a l'esquema per col·locar-lo (R gira, M mirall, Esc acaba)" : "");
     setStatus(msg);
-    renderToolbars(); renderSymbars(); A.redraw();
+    renderToolbars(); renderCatbar(); renderSymbars(); A.redraw();
   };
 
   // ------------------------------------------------------------------ simulation
   A.startSim = function (all) {
     A.wireFrom = null; A.drag = null; A.sel.clear(); A.tool = { t: "select" };
+    A.closeSymDeploy();
     var faults = [];
     (all ? A.tabs : [A.tab()]).forEach(function (t) {
       if (t.mode === "pause") { t.mode = "sim"; return; }
@@ -445,6 +518,43 @@
       A.changed();
     }], ["Cancel·la", null]]);
   };
+  A.setDeployMode = function (mode, preview) {
+    if (!DEPLOY_MODES.some(function (m) { return m[0] === mode; })) return;
+    A.deployMode = mode;
+    savePrefs();
+    var targetCat = A.openCat || (preview ? (A.cat || "Feeds") : null);
+    A.openCat = null;
+    A.radialMenu = null;
+    var pop = $("sym-popover");
+    if (pop) { pop.removeAttribute("data-closing"); pop.hidden = true; pop.innerHTML = ""; }
+    renderCatbar();
+    if (targetCat && A.tab().mode === "edit") {
+      A.toggleCat(targetCat, true);
+    } else {
+      renderSymbars();
+    }
+  };
+  A.prefsDialog = function () {
+    var grid = el("div", { class: "pref-modes" });
+    DEPLOY_MODES.forEach(function (m) {
+      var r = el("input", { type: "radio", name: "deployMode", value: m[0] });
+      if (m[0] === A.deployMode) r.checked = true;
+      var card = el("label", { class: "pref-mode-card" }, [
+        r,
+        el("span", { class: "pref-mode-icon", text: m[2] }),
+        el("span", { text: m[1] }),
+      ]);
+      grid.appendChild(card);
+    });
+    dialog("Preferències", [
+      el("b", { text: "Mode de desplegament dels menús d'icones" }),
+      el("div", { class: "hint", text: "Seleccioneu com es despleguen els símbols en fer clic sobre una família principal:" }),
+      grid,
+    ], [["D'acord", function () {
+      var sel = grid.querySelector("input:checked");
+      if (sel) A.setDeployMode(sel.value, true);
+    }], ["Cancel·la", null]]);
+  };
   A.about = function () {
     dialog("Quant a " + APP, [el("div", { html: "<b>CADwebSimu</b> — versió web 1.0<br>Editor i simulador d'esquemes elèctrics de comandament i potència.<br>Els esquemes es desen com a fitxers .ecs, compatibles amb la versió per a macOS." })], [["D'acord", null]]);
   };
@@ -474,6 +584,7 @@
     pause: "<rect x='6' y='4' width='4.5' height='16' rx='1' fill='#fd7e14' stroke='#d96200'/><rect x='13.5' y='4' width='4.5' height='16' rx='1' fill='#fd7e14' stroke='#d96200'/>",
     step: "<polygon points='4 4 14 12 4 20 4 4' fill='#28a745' stroke='#1e7e34'/><rect x='16.5' y='4' width='3.5' height='16' rx='1' fill='#2b6cb0' stroke='#1e4e8c'/>",
     all: "<polygon points='2 4 11 12 2 20 2 4' fill='#28a745' stroke='#1e7e34'/><polygon points='12 4 21 12 12 20 12 4' fill='#28a745' stroke='#1e7e34'/>",
+    prefs: "<circle cx='12' cy='12' r='3.2' fill='#fff'/><path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.02 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'/>",
     info: "<circle cx='12' cy='12' r='10' fill='#e8f4fd' stroke='#1d6fa5'/><path d='M12 16v-5M12 8h.01' stroke='#1d6fa5' stroke-width='2.2'/>",
     select: "<path d='M5 3l13 9.5-6 1.2 3.8 6.8-2.4 1.3-3.8-6.8-4.6 3.8z' fill='#fff'/>",
     wire: "<path d='M4 5v14h16' stroke='#0050c8' stroke-width='2'/><circle cx='4' cy='5' r='2.5' fill='#dc3545' stroke='#900'/><circle cx='20' cy='19' r='2.5' fill='#dc3545' stroke='#900'/>",
@@ -538,7 +649,7 @@
       tb("mirror", "Mirall (M)", function () { A.rotate(0, true); }), sep(),
       tb("play", "Simulació (F5)", function () { A.startSim(false); }, mode === "sim"), tb("stop", "Stop / Edició", A.stopSim, mode === "edit"),
       tb("pause", "Pausa", A.pause, mode === "pause"), tb("step", "Pas a pas", A.step), tb("all", "Simula tots els documents", function () { A.startSim(true); }), sep(),
-      tb("info", "Quant a", A.about)].forEach(function (x) { a.appendChild(x); });
+      tb("prefs", "Preferències", A.prefsDialog), tb("info", "Quant a", A.about)].forEach(function (x) { a.appendChild(x); });
     var b = $("toolbar2"); b.innerHTML = "";
     b.appendChild(tb("select", "Selecciona", function () { A.setTool({ t: "select" }); }, T.t === "select"));
     b.appendChild(tb("wire", "Cable (connecta terminals)", function () { A.setTool({ t: "wire" }); }, T.t === "wire"));
@@ -563,31 +674,276 @@
     $("toolbar1").hidden = $("toolbar2").hidden = !A.showToolbar;
   }
 
+  function makeSymBtn(k, idx, extraVars) {
+    var cv = el("canvas");
+    var isOn = A.tool.t === "place" && A.tool.kind === k.id;
+    var b = el("button", { class: "symbtn" + (isOn ? " on" : "") }, [cv]);
+    b.style.setProperty("--i", String(idx));
+    if (extraVars) {
+      Object.keys(extraVars).forEach(function (vk) { b.style.setProperty(vk, extraVars[vk]); });
+    }
+    attachTip(b, k.label);
+    b.addEventListener("click", function (e) {
+      e.stopPropagation();
+      hideTip();
+      if (A.tab().mode === "edit") {
+        A.setTool({ t: "place", kind: k.id });
+        A.closeSymDeploy();
+      }
+      $("canvas").focus();
+    });
+    requestAnimationFrame(function () { SL.drawIcon(cv, k.id, "#1a1a1a"); });
+    return b;
+  }
+
+  A.closeSymDeploy = function (done) {
+    if (!A.openCat && !A.radialMenu) { if (done) done(); return; }
+    A.openCat = null;
+    A.radialMenu = null;
+    [].forEach.call(document.querySelectorAll("#catbar .catbtn.open"), function (b) {
+      b.classList.remove("open", "on");
+    });
+    updateCatLabel();
+    var pop = $("sym-popover");
+    if (pop && !pop.hidden) {
+      hideElement(pop, done);
+    } else if (done) {
+      done();
+    }
+  };
+
+  A.toggleCat = function (catId, forceOpen) {
+    if (A.tab().mode !== "edit") return;
+    var shouldOpen = forceOpen != null ? forceOpen : A.openCat !== catId;
+    A.cat = catId;
+    A.radialMenu = null;
+    if (!shouldOpen) {
+      A.closeSymDeploy();
+      return;
+    }
+    A.openCat = catId;
+    renderCatbar();
+    renderSymbars();
+  };
+
+  A.openRadialMenu = function (clientX, clientY, catId) {
+    if (A.tab().mode !== "edit") return;
+    A.openCat = null;
+    if (catId) A.cat = catId;
+    A.radialMenu = { x: clientX, y: clientY, cat: catId || null };
+    renderCatbar();
+    renderSymbars();
+  };
+
+  function updateCatLabel() {
+    var lbl = $("catlabel");
+    if (!lbl) return;
+    var activeKind = A.tool.t === "place" && SL.KINDS[A.tool.kind];
+    var openCatObj = A.openCat && SL.CATS.find(function (x) { return x.id === A.openCat; });
+    if (openCatObj && activeKind && activeKind.cat === openCatObj.id) {
+      lbl.textContent = openCatObj.label + " › " + activeKind.label;
+    } else if (openCatObj) {
+      lbl.textContent = openCatObj.label;
+    } else if (activeKind) {
+      var catObj = SL.CATS.find(function (x) { return x.id === activeKind.cat; });
+      lbl.textContent = (catObj ? catObj.label + " › " : "") + activeKind.label;
+    } else {
+      lbl.textContent = "";
+    }
+  }
+
   function renderCatbar() {
-    var c = $("catbar"); c.innerHTML = "";
+    var c = $("catbar"), edit = A.tab().mode === "edit";
+    c.innerHTML = "";
+    c.classList.toggle("sym-disabled", !edit);
+    var activeKind = A.tool.t === "place" && SL.KINDS[A.tool.kind];
     SL.CATS.forEach(function (cat) {
       var cv = el("canvas");
-      var b = el("button", { class: "catbtn" + (A.cat === cat.id ? " on" : "") }, [cv]);
+      var isOpen = A.openCat === cat.id;
+      var hasTool = activeKind && activeKind.cat === cat.id;
+      var cls = "catbtn" + (isOpen ? " on open" : "") + (hasTool ? " has-tool" : "");
+      var b = el("button", { class: cls, "data-cat": cat.id, "aria-expanded": isOpen ? "true" : "false" }, [cv]);
       attachTip(b, cat.label);
-      b.addEventListener("click", function () { A.cat = cat.id; renderCatbar(); renderSymbars(); });
+      b.addEventListener("click", function (e) {
+        e.stopPropagation();
+        hideTip();
+        A.toggleCat(cat.id);
+      });
       c.appendChild(b);
       requestAnimationFrame(function () { SL.drawIcon(cv, cat.icon, "#1a1a1a"); });
     });
-    c.appendChild(el("span", { id: "catlabel", text: (SL.CATS.find(function (x) { return x.id === A.cat; }) || {}).label }));
+    c.appendChild(el("span", { id: "catlabel" }));
+    updateCatLabel();
+
+    var modeMeta = DEPLOY_MODES.find(function (m) { return m[0] === A.deployMode; }) || DEPLOY_MODES[0];
+    var modeBtn = el("button", {
+      class: "deploy-mode-btn",
+      on: { click: function (e) { e.stopPropagation(); A.prefsDialog(); } },
+    }, [
+      el("span", { text: modeMeta[2] }),
+      el("span", { text: modeMeta[1] }),
+    ]);
+    attachTip(modeBtn, "Preferències: canvia el mode de desplegament d'icones");
+    c.appendChild(modeBtn);
     c.hidden = !A.showSymbars;
   }
-  function renderSymbars() {
-    var s = $("symbar"), edit = A.tab().mode === "edit"; s.innerHTML = "";
-    s.classList.toggle("disabled", !edit);
-    SL.KIND_LIST.filter(function (k) { return k.cat === A.cat; }).forEach(function (k) {
-      var cv = el("canvas");
-      var b = el("button", { class: "symbtn" + (A.tool.t === "place" && A.tool.kind === k.id ? " on" : "") }, [cv]);
-      attachTip(b, k.label);
-      b.addEventListener("click", function () { if (A.tab().mode === "edit") A.setTool({ t: "place", kind: k.id }); $("canvas").focus(); });
-      s.appendChild(b);
-      requestAnimationFrame(function () { SL.drawIcon(cv, k.id, "#1a1a1a"); });
+
+  function buildCircleMenu(pop, cx, cy, bx, by, nodes, hubContent, hubTip, onHubClick) {
+    var count = nodes.length;
+    var radius = count <= 1 ? 50 : count <= 4 ? 58 : Math.max(68, Math.round((count * 54) / (2 * Math.PI)));
+    var diam = radius * 2 + 64;
+    var clampedX = Math.max(diam / 2 + 10, Math.min(window.innerWidth - diam / 2 - 10, cx));
+    var clampedY = Math.max(diam / 2 + 10, Math.min(window.innerHeight - diam / 2 - 10, cy));
+    pop.style.width = diam + "px";
+    pop.style.height = diam + "px";
+    pop.style.left = Math.round(clampedX - diam / 2) + "px";
+    pop.style.top = Math.round(clampedY - diam / 2) + "px";
+
+    var ring = el("div", { class: "circle-ring" });
+    ring.style.width = (radius * 2 + 18) + "px";
+    ring.style.height = (radius * 2 + 18) + "px";
+    pop.appendChild(ring);
+
+    var hub = el("button", {
+      class: "circle-hub",
+      on: { click: function (e) { e.stopPropagation(); hideTip(); onHubClick(); } },
+    }, Array.isArray(hubContent) ? hubContent : [el("span", { text: hubContent })]);
+    attachTip(hub, hubTip);
+    pop.appendChild(hub);
+
+    nodes.forEach(function (btn, idx) {
+      var ang = count === 1 ? Math.PI / 2 : -Math.PI / 2 + (2 * Math.PI * idx) / count;
+      var tx = Math.round(radius * Math.cos(ang));
+      var ty = Math.round(radius * Math.sin(ang));
+      btn.style.setProperty("--i", String(idx));
+      btn.style.setProperty("--tx", tx + "px");
+      btn.style.setProperty("--ty", ty + "px");
+      btn.style.setProperty("--bx", Math.round(bx - clampedX) + "px");
+      btn.style.setProperty("--by", Math.round(by - clampedY) + "px");
+      pop.appendChild(btn);
     });
-    s.hidden = !A.showSymbars;
+  }
+
+  function renderSymbars() {
+    var s = $("symbar");
+    if (s) s.hidden = true;
+    var pop = $("sym-popover");
+    if (!pop) return;
+    var edit = A.tab().mode === "edit";
+    if (!edit || (!A.radialMenu && (!A.showSymbars || !A.openCat))) {
+      if (!pop.hidden) hideElement(pop);
+      return;
+    }
+
+    pop.hidden = true;
+    pop.innerHTML = "";
+    pop.removeAttribute("style");
+    void pop.offsetWidth;
+
+    if (A.radialMenu) {
+      pop.className = "mode-circle";
+      var rx = A.radialMenu.x, ry = A.radialMenu.y;
+      if (!A.radialMenu.cat) {
+        var catBtns = SL.CATS.map(function (cat, idx) {
+          var cv = el("canvas");
+          var b = el("button", { class: "symbtn radial-cat" + (A.cat === cat.id ? " on" : "") }, [cv]);
+          attachTip(b, cat.label);
+          b.addEventListener("click", function (e) {
+            e.stopPropagation();
+            hideTip();
+            A.openRadialMenu(rx, ry, cat.id);
+          });
+          requestAnimationFrame(function () { SL.drawIcon(cv, cat.icon, "#1a1a1a"); });
+          return b;
+        });
+        buildCircleMenu(
+          pop, rx, ry, rx, ry, catBtns,
+          "Famílies",
+          "Tanca el menú circular",
+          function () { A.closeSymDeploy(); }
+        );
+      } else {
+        var rCatObj = SL.CATS.find(function (x) { return x.id === A.radialMenu.cat; });
+        var rItems = SL.KIND_LIST.filter(function (k) { return k.cat === A.radialMenu.cat; });
+        var symBtns = rItems.map(function (k, idx) {
+          return makeSymBtn(k, idx);
+        });
+        var shortCat = rCatObj ? rCatObj.label.split(",")[0] : "";
+        buildCircleMenu(
+          pop, rx, ry, rx, ry, symBtns,
+          [el("span", { class: "hub-back", text: "← Enrere" }), el("span", { text: shortCat })],
+          "Torna a les famílies",
+          function () { A.openRadialMenu(rx, ry, null); }
+        );
+      }
+      showElement(pop);
+      return;
+    }
+
+    var catObj = SL.CATS.find(function (x) { return x.id === A.openCat; });
+    var items = SL.KIND_LIST.filter(function (k) { return k.cat === A.openCat; });
+    var catBtn = document.querySelector("#catbar .catbtn[data-cat='" + A.openCat + "']");
+    if (!catBtn || !items.length) {
+      pop.hidden = true;
+      return;
+    }
+    var btnRect = catBtn.getBoundingClientRect();
+    var barRect = $("catbar").getBoundingClientRect();
+    var bx = btnRect.left + btnRect.width / 2;
+    var by = btnRect.top + btnRect.height / 2;
+
+    pop.className = "mode-" + A.deployMode;
+
+    if (A.deployMode === "down") {
+      var pw = 58;
+      var left = Math.max(8, Math.min(window.innerWidth - pw - 8, Math.round(bx - pw / 2)));
+      var top = Math.round(barRect.bottom + 5);
+      pop.style.left = left + "px";
+      pop.style.top = top + "px";
+      pop.style.setProperty("--top", top + "px");
+      items.forEach(function (k, idx) {
+        pop.appendChild(makeSymBtn(k, idx));
+      });
+    } else if (A.deployMode === "grid") {
+      var n = items.length;
+      var cols = n <= 3 ? n : n === 4 ? 2 : n <= 9 ? 3 : 4;
+      var gw = cols * 42 + (cols - 1) * 6 + 20;
+      var gLeft = Math.max(8, Math.min(window.innerWidth - gw - 8, Math.round(bx - gw / 2)));
+      var gTop = Math.round(barRect.bottom + 5);
+      pop.style.left = gLeft + "px";
+      pop.style.top = gTop + "px";
+      pop.style.setProperty("--origin-x", Math.round(bx - gLeft) + "px");
+      if (catObj) {
+        pop.appendChild(el("div", { class: "sym-popover-header", text: catObj.label }));
+      }
+      var gridBox = el("div", { class: "sym-grid" });
+      gridBox.style.setProperty("--cols", String(cols));
+      items.forEach(function (k, idx) {
+        var col = idx % cols, rowIdx = Math.floor(idx / cols);
+        var cellX = gLeft + 10 + col * 48 + 21;
+        var cellY = gTop + 28 + rowIdx * 52 + 23;
+        gridBox.appendChild(makeSymBtn(k, col + rowIdx, {
+          "--ox": Math.round((bx - cellX) * 0.45) + "px",
+          "--oy": Math.round((by - cellY) * 0.45) + "px",
+        }));
+      });
+      pop.appendChild(gridBox);
+    } else if (A.deployMode === "circle") {
+      var count = items.length;
+      var radius = count <= 1 ? 50 : count <= 4 ? 58 : Math.max(68, Math.round((count * 54) / (2 * Math.PI)));
+      var cy = Math.round(barRect.bottom + radius + 34);
+      var shortLabel = catObj ? catObj.label.split(",")[0] : "";
+      var topSymBtns = items.map(function (k, idx) {
+        return makeSymBtn(k, idx);
+      });
+      buildCircleMenu(
+        pop, bx, cy, bx, by, topSymBtns,
+        shortLabel,
+        "Tanca " + (catObj ? catObj.label : ""),
+        function () { A.closeSymDeploy(); }
+      );
+    }
+    showElement(pop);
   }
   function renderTabs() {
     var c = $("tabs"); c.innerHTML = "";
@@ -609,11 +965,13 @@
         ["Nou", A.newDoc, "⌘N"], ["Obre...", A.open, "⌘O"], ["Tanca", function () { A.requestClose(A.active); }],
         ["Desa", A.save, "⌘S"], ["Anomena i desa...", A.saveAs], "-",
         ["Exporta imatge...", A.exportImage], "-", ["Imprimeix...", A.print, "⌘P"], "-",
-        ["Configuració...", A.configDialog]]],
+        ["Configuració...", A.configDialog],
+        ["Preferències...", A.prefsDialog, "⌘,"]]],
       ["Edita", [
         ["Desfés", A.undo, "⌘Z", !edit], ["Refés", A.redo, "⌘Y", !edit], "-",
         ["Retalla", A.cut, "⌘X", !edit], ["Copia", A.copy, "⌘C"], ["Enganxa", A.paste, "⌘V", !edit], "-",
-        ["Selecciona-ho tot", A.selectAll, "⌘A"], "-", ["Caixetí...", A.titleDialog]]],
+        ["Selecciona-ho tot", A.selectAll, "⌘A"], "-", ["Caixetí...", A.titleDialog],
+        ["Preferències...", A.prefsDialog, "⌘,"]]],
       ["Dibuixa", [
         ["Redibuixa", A.redraw], ["Línia", function () { A.setTool({ t: "shape", kind: "Line" }); }],
         ["Rectangle", function () { A.setTool({ t: "shape", kind: "Rect" }); }], ["El·lipse", function () { A.setTool({ t: "shape", kind: "Ellipse" }); }],
@@ -631,8 +989,12 @@
       ["Barres", [
         ["Barra d'eines", function () { A.showToolbar = !A.showToolbar; renderToolbars(); }, null, false, A.showToolbar],
         ["Barra d'estat", function () { A.showStatus = !A.showStatus; $("statusbar").hidden = !A.showStatus; }, null, false, A.showStatus],
-        ["Barres de símbols", function () { A.showSymbars = !A.showSymbars; renderCatbar(); renderSymbars(); }, null, false, A.showSymbars], "-"]
-        .concat(SL.CATS.map(function (c) { return [c.bar, function () { A.cat = c.id; A.showSymbars = true; renderCatbar(); renderSymbars(); }, null, false, A.cat === c.id]; }))],
+        ["Barres de símbols", function () { A.showSymbars = !A.showSymbars; if (!A.showSymbars) A.openCat = null; renderCatbar(); renderSymbars(); }, null, false, A.showSymbars],
+        ["Desplegament d'icones", DEPLOY_MODES.map(function (m) {
+          return [m[2] + " " + m[1], function () { A.setDeployMode(m[0], true); }, null, false, A.deployMode === m[0]];
+        })],
+        "-"]
+        .concat(SL.CATS.map(function (c) { return [c.bar, function () { A.showSymbars = true; A.toggleCat(c.id, true); }, null, false, A.openCat === c.id]; }))],
       ["Finestra", [["Nova finestra", A.newDoc], "-"].concat(A.tabs.map(function (tt, i) {
         return [(i + 1) + " " + tt.title, function () { A.active = i; A.sel.clear(); refreshAll(); }, null, false, i === A.active];
       }))],
@@ -686,7 +1048,15 @@
     if (w) w.classList.add("open");
   }
   function closeMenus() { [].forEach.call(document.querySelectorAll(".menu.open"), function (m) { m.classList.remove("open"); }); }
-  document.addEventListener("click", closeMenus);
+  document.addEventListener("click", function (e) {
+    closeMenus();
+    if ((A.openCat || A.radialMenu) && !e.target.closest("#catbar") && !e.target.closest("#sym-popover")) {
+      A.closeSymDeploy();
+    }
+  });
+  window.addEventListener("resize", function () {
+    if (A.openCat || A.radialMenu) renderSymbars();
+  });
 
   function setStatus(s) { $("status").textContent = s; }
   A.setStatus = setStatus;
@@ -698,7 +1068,7 @@
     $("coords").textContent = A.hover ? "X: " + Math.round(A.hover[0] / 5) + " mm  Y: " + Math.round(A.hover[1] / 5) + " mm" : "";
   }
   A.updateStatus = updateStatus;
-  function refreshAll() { renderToolbars(); renderSymbars(); renderTabs(); updateStatus(); A.redraw(); }
+  function refreshAll() { renderToolbars(); renderCatbar(); renderSymbars(); renderTabs(); updateStatus(); A.redraw(); }
   A.refreshAll = refreshAll;
 
   // ------------------------------------------------------------------ keyboard
@@ -715,6 +1085,7 @@
     else if (cmd && k === "o") A.open();
     else if (cmd && (k === "s" || k === "g")) A.save();
     else if (cmd && k === "p") A.print();
+    else if (cmd && k === ",") A.prefsDialog();
     else if (cmd && k === "z") { if (e.shiftKey) A.redo(); else A.undo(); }
     else if (cmd && k === "y") A.redo();
     else if (cmd && k === "x") A.cut();
@@ -726,7 +1097,11 @@
     else if (!cmd && k === "r") A.rotate(1, false);
     else if (!cmd && k === "m") A.rotate(0, true);
     else if (!cmd && (e.key === "Delete" || e.key === "Backspace")) A.deleteSel();
-    else if (e.key === "Escape") { if (A.wireFrom) { A.wireFrom = null; A.redraw(); } else A.setTool({ t: "select" }); }
+    else if (e.key === "Escape") {
+      if (A.openCat || A.radialMenu) A.closeSymDeploy();
+      else if (A.wireFrom) { A.wireFrom = null; A.redraw(); }
+      else A.setTool({ t: "select" });
+    }
     else if (e.key === "F5") { if (A.tab().mode === "edit") A.startSim(false); else A.stopSim(); }
     else done = false;
     if (done) e.preventDefault();
@@ -734,10 +1109,13 @@
 
   // ------------------------------------------------------------------ start
   function init() {
+    loadPrefs();
     if (!restore()) A.tabs = [newTab("Esquema1", SL.newDoc())];
     var q = new URLSearchParams(location.search);
     if (q.get("ejemplo") === "1" || q.get("ejemplo") === "2" || q.get("ejemplo") === "3") A.loadExample(+q.get("ejemplo"));
     $("fileinput").addEventListener("change", onFile);
+    var pop = $("sym-popover");
+    if (pop) pop.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     window.addEventListener("keydown", onKey);
     window.addEventListener("beforeunload", persist);
     renderMenus(); renderCatbar(); refreshAll();

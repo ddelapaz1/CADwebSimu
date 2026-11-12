@@ -61,7 +61,12 @@
     });
   };
 
-  var cv, g, dpr = 1;
+  var cv, g, dpr = 1, rcTimer = null, rcHold = null;
+
+  function clearRcHold() {
+    if (rcTimer) { clearTimeout(rcTimer); rcTimer = null; }
+    rcHold = null;
+  }
 
   function world(e) {
     var rc = cv.getBoundingClientRect(), v = A.tab().view;
@@ -122,6 +127,23 @@
     cv.focus();
     if (A.dialogOpen) return;
     var m = world(e), t = A.tab(), w = m.w, sw = [SL.snap(w[0]), SL.snap(w[1])];
+    if (e.button === 2 || (e.button === 0 && e.ctrlKey)) {
+      var wasOpen = !!(A.openCat || A.radialMenu);
+      if (wasOpen && A.closeSymDeploy) A.closeSymDeploy();
+      clearRcHold();
+      if (t.mode === "edit") {
+        rcHold = { x: e.clientX, y: e.clientY, wasOpen: wasOpen };
+        rcTimer = setTimeout(function () {
+          var hx = rcHold ? rcHold.x : e.clientX;
+          var hy = rcHold ? rcHold.y : e.clientY;
+          clearRcHold();
+          if (A.openRadialMenu) A.openRadialMenu(hx, hy, null);
+        }, 500);
+      }
+      return;
+    }
+    clearRcHold();
+    if ((A.openCat || A.radialMenu) && A.closeSymDeploy) A.closeSymDeploy();
     if (e.button === 1 || (e.button === 0 && e.altKey)) { A.drag = { t: "pan", x: e.clientX, y: e.clientY }; cv.setPointerCapture(e.pointerId); return; }
     if (t.mode !== "edit") {
       if (e.button !== 0) return;
@@ -140,12 +162,6 @@
         }
       }
       if (t.mode === "sim") { var f = t.sim.tick(t.doc, 0); if (f) A.fault(t, f); }
-      A.redraw();
-      return;
-    }
-    if (e.button === 2) {
-      if (A.tool.t === "wire" && A.wireFrom) A.wireFrom = null;
-      else if (A.tool.t !== "select") A.setTool({ t: "select" });
       A.redraw();
       return;
     }
@@ -183,6 +199,9 @@
   }
 
   function onMove(e) {
+    if (rcHold && Math.hypot(e.clientX - rcHold.x, e.clientY - rcHold.y) > 8) {
+      clearRcHold();
+    }
     var m = world(e);
     A.hover = m.w;
     var dr = A.drag;
@@ -198,6 +217,16 @@
 
   function onUp(e) {
     var t = A.tab();
+    if (rcHold) {
+      var wasOpen = rcHold.wasOpen;
+      clearRcHold();
+      if (!wasOpen && t.mode === "edit") {
+        if (A.tool.t === "wire" && A.wireFrom) A.wireFrom = null;
+        else if (A.tool.t !== "select") A.setTool({ t: "select" });
+        A.redraw();
+      }
+      return;
+    }
     if (A.pressed != null) {
       t.sim && t.sim.setActuator(t.doc, A.pressed, false);
       A.pressed = null;
@@ -304,7 +333,7 @@
       cv.addEventListener("pointermove", onMove);
       cv.addEventListener("pointerup", onUp);
       cv.addEventListener("pointercancel", onUp);
-      cv.addEventListener("pointerleave", function () { A.hover = null; A.updateStatus(); A.redraw(); });
+      cv.addEventListener("pointerleave", function () { clearRcHold(); A.hover = null; A.updateStatus(); A.redraw(); });
       cv.addEventListener("dblclick", onDbl);
       cv.addEventListener("wheel", onWheel, { passive: false });
       cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
