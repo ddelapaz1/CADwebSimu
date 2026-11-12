@@ -76,6 +76,8 @@ SL.CATS = [
     ["Lamp", "Coils", "Làmpada (pilot)", "Load", 0, false, "-H"],
     ["Buzzer", "Coils", "Brunzidor", "Load", 0, false, "-H"],
     ["Horn", "Coils", "Botzina", "Load", 0, false, "-H"],
+    ["Wire", "Connections", "Cable", "Tool", 0, false, "", "wire"],
+    ["Junction", "Connections", "Punt de connexió", "Tool", 0, false, "", "junction"],
     ["Terminal", "Connections", "Born", "Passive", 0, false, "-X"],
   ];
   var feeds = {
@@ -97,6 +99,7 @@ SL.CATS = [
     var k = {
       id: r[0], cat: r[1], label: r[2], role: r[3],
       poles: r[4] || 0, nc: !!r[5], prefix: r[6] || "",
+      tool: r[7] || null,
       feed: feeds[r[0]] || [],
     };
     k.timer = ["TimerOn", "TimerOff", "TimerOnOff", "Flasher"].indexOf(k.id) >= 0;
@@ -125,7 +128,7 @@ SL.PAGE_SIZES = {
 SL.newDoc = function () {
   return {
     format: "ElectroCADSim-1",
-    comps: [], wires: [], drawings: [], texts: [],
+    comps: [], wires: [], junctions: [], no_junctions: [], drawings: [], texts: [],
     page: { size: "A4Horizontal", border: true, references: true, title_block: true, show_terminals: true },
     title: { drawn: "", checked: "", date: "", entity: "", title: "", number: "" },
     next_id: 1,
@@ -135,7 +138,7 @@ SL.newDoc = function () {
 SL.normalizeDoc = function (d) {
   var n = SL.newDoc();
   d = d || {};
-  n.comps = (d.comps || []).filter(function (c) { return SL.KINDS[c.kind]; }).map(function (c) {
+  n.comps = (d.comps || []).filter(function (c) { return SL.KINDS[c.kind] && !SL.KINDS[c.kind].tool; }).map(function (c) {
     return {
       id: c.id, kind: c.kind, x: c.x | 0, y: c.y | 0, rot: c.rot | 0, mirror: !!c.mirror,
       name: c.name || "", func: c.func || "",
@@ -146,6 +149,8 @@ SL.normalizeDoc = function (d) {
     };
   });
   n.wires = (d.wires || []).map(function (w) { return { id: w.id, a: [w.a[0], w.a[1]], b: [w.b[0], w.b[1]] }; });
+  n.junctions = (d.junctions || []).map(function (p) { return [p[0] | 0, p[1] | 0]; });
+  n.no_junctions = (d.no_junctions || []).map(function (p) { return [p[0] | 0, p[1] | 0]; });
   n.drawings = d.drawings || [];
   n.texts = d.texts || [];
   if (d.page) Object.assign(n.page, d.page);
@@ -176,6 +181,125 @@ SL.wireInterior = function (w, p) {
   return false;
 };
 
+SL.hasJunction = function (doc, p) {
+  return (doc.junctions || []).some(function (j) { return j[0] === p[0] && j[1] === p[1]; });
+};
+
+SL.hasNoJunction = function (doc, p) {
+  return (doc.no_junctions || []).some(function (j) { return j[0] === p[0] && j[1] === p[1]; });
+};
+
+SL.wireDirsAt = function (doc, p) {
+  var x = p[0], y = p[1], l = false, r = false, u = false, d = false;
+  (doc.wires || []).forEach(function (w) {
+    var x0 = Math.min(w.a[0], w.b[0]), x1 = Math.max(w.a[0], w.b[0]);
+    var y0 = Math.min(w.a[1], w.b[1]), y1 = Math.max(w.a[1], w.b[1]);
+    if (w.a[1] === w.b[1] && w.a[1] === y && x >= x0 && x <= x1) {
+      if (x > x0) l = true;
+      if (x < x1) r = true;
+    } else if (w.a[0] === w.b[0] && w.a[0] === x && y >= y0 && y <= y1) {
+      if (y > y0) u = true;
+      if (y < y1) d = true;
+    }
+  });
+  var count = (l ? 1 : 0) + (r ? 1 : 0) + (u ? 1 : 0) + (d ? 1 : 0);
+  return {
+    l: l, r: r, u: u, d: d,
+    count: count,
+    h: l || r,
+    v: u || d,
+    cross: l && r && u && d,
+    tee: count === 3,
+  };
+};
+
+SL.isConnectedJunction = function (doc, p) {
+  var dirs = SL.wireDirsAt(doc, p);
+  if (dirs.cross) return SL.hasJunction(doc, p);
+  if (dirs.tee) return !SL.hasNoJunction(doc, p);
+  return false;
+};
+
+SL.junctionPoints = function (doc) {
+  var seen = {}, pts = [];
+  function consider(p) {
+    var k = p[0] + "," + p[1];
+    if (seen[k]) return;
+    seen[k] = true;
+    if (SL.isConnectedJunction(doc, p)) pts.push([p[0], p[1]]);
+  }
+  (doc.wires || []).forEach(function (w) { consider(w.a); consider(w.b); });
+  (doc.junctions || []).forEach(consider);
+  var hs = [], vs = [];
+  (doc.wires || []).forEach(function (w) {
+    if (w.a[1] === w.b[1]) hs.push(w);
+    else if (w.a[0] === w.b[0]) vs.push(w);
+  });
+  hs.forEach(function (h) {
+    var hx0 = Math.min(h.a[0], h.b[0]), hx1 = Math.max(h.a[0], h.b[0]), hy = h.a[1];
+    vs.forEach(function (v) {
+      var vy0 = Math.min(v.a[1], v.b[1]), vy1 = Math.max(v.a[1], v.b[1]), vx = v.a[0];
+      if (vx >= hx0 && vx <= hx1 && hy >= vy0 && hy <= vy1) consider([vx, hy]);
+    });
+  });
+  return pts;
+};
+
+SL.toggleJunction = function (doc, p) {
+  if (!doc.junctions) doc.junctions = [];
+  if (!doc.no_junctions) doc.no_junctions = [];
+  var sw = [SL.snap(p[0]), SL.snap(p[1])];
+  var dirs = SL.wireDirsAt(doc, sw);
+  if (!(dirs.h && dirs.v)) {
+    // Search nearest crossing/T-junction within 1 grid unit
+    var best = null, bestD = SL.GRID + 1;
+    var hs = [], vs = [];
+    (doc.wires || []).forEach(function (w) {
+      if (w.a[1] === w.b[1]) hs.push(w);
+      else if (w.a[0] === w.b[0]) vs.push(w);
+    });
+    hs.forEach(function (h) {
+      var hx0 = Math.min(h.a[0], h.b[0]), hx1 = Math.max(h.a[0], h.b[0]), hy = h.a[1];
+      vs.forEach(function (v) {
+        var vy0 = Math.min(v.a[1], v.b[1]), vy1 = Math.max(v.a[1], v.b[1]), vx = v.a[0];
+        if (vx >= hx0 && vx <= hx1 && hy >= vy0 && hy <= vy1) {
+          var dist = Math.hypot(vx - p[0], hy - p[1]);
+          if (dist < bestD) { bestD = dist; best = [vx, hy]; }
+        }
+      });
+    });
+    if (!best) return { changed: false };
+    sw = best;
+    dirs = SL.wireDirsAt(doc, sw);
+  }
+  if (!dirs.cross && !dirs.tee) return { changed: false };
+  var connected = SL.isConnectedJunction(doc, sw);
+  doc.junctions = doc.junctions.filter(function (j) { return j[0] !== sw[0] || j[1] !== sw[1]; });
+  doc.no_junctions = doc.no_junctions.filter(function (j) { return j[0] !== sw[0] || j[1] !== sw[1]; });
+  if (connected) {
+    if (dirs.tee) doc.no_junctions.push([sw[0], sw[1]]);
+    return { changed: true, connected: false, pt: sw };
+  } else {
+    if (dirs.cross) doc.junctions.push([sw[0], sw[1]]);
+    return { changed: true, connected: true, pt: sw };
+  }
+};
+
+SL.cleanJunctions = function (doc) {
+  if (doc.junctions) {
+    doc.junctions = doc.junctions.filter(function (p) {
+      var dirs = SL.wireDirsAt(doc, p);
+      return dirs.cross || dirs.tee;
+    });
+  }
+  if (doc.no_junctions) {
+    doc.no_junctions = doc.no_junctions.filter(function (p) {
+      var dirs = SL.wireDirsAt(doc, p);
+      return dirs.tee;
+    });
+  }
+};
+
 SL.addWire = function (doc, a, b) {
   if (a[0] === b[0] && a[1] === b[1]) return;
   for (var i = 0; i < doc.wires.length; i++) {
@@ -186,10 +310,610 @@ SL.addWire = function (doc, a, b) {
   doc.wires.push({ id: SL.newId(doc), a: [a[0], a[1]], b: [b[0], b[1]] });
 };
 
-/** Orthogonal route: straight, or an L (horizontal first). */
+SL.chooseRouteMid = function (doc, a, b) {
+  if (a[0] === b[0] || a[1] === b[1]) return a;
+  var m1 = [b[0], a[1]], m2 = [a[0], b[1]];
+  function pointHitsWireOrTerm(p) {
+    var onW = (doc.wires || []).some(function (w) {
+      return (w.a[0] === p[0] && w.a[1] === p[1]) || (w.b[0] === p[0] && w.b[1] === p[1]) || SL.wireInterior(w, p);
+    });
+    if (onW) return true;
+    return (doc.comps || []).some(function (c) {
+      return SL.terminals(c).some(function (t) { return t[0] === p[0] && t[1] === p[1]; });
+    });
+  }
+  if (pointHitsWireOrTerm(m1) && !pointHitsWireOrTerm(m2)) return m2;
+  return m1;
+};
+
+/** Orthogonal route: straight, or an L (horizontal first unless blocked). */
 SL.addRoute = function (doc, a, b) {
   if (a[0] === b[0] || a[1] === b[1]) SL.addWire(doc, a, b);
-  else { var m = [b[0], a[1]]; SL.addWire(doc, a, m); SL.addWire(doc, m, b); }
+  else {
+    var m = SL.chooseRouteMid(doc, a, b);
+    SL.addWire(doc, a, m);
+    SL.addWire(doc, m, b);
+  }
+};
+
+/**
+ * Find a valid orthogonal (90° turns only) route between pA and pB on the 15-unit grid.
+ * opts: { dirA, dirB, wires, comps }
+ * Returns array of points [p0, p1, ..., pk] or null if impossible.
+ */
+SL.routeOrthogonal = function (doc, pA, pB, opts) {
+  opts = opts || {};
+  if (pA[0] === pB[0] && pA[1] === pB[1]) return null;
+  var ps = (SL.PAGE_SIZES && doc.page && SL.PAGE_SIZES[doc.page.size]) || { w: 1485, h: 1050 };
+  var minX = 0, minY = 0, maxX = ps.w, maxY = ps.h;
+  if (pA[0] < minX || pA[0] > maxX || pA[1] < minY || pA[1] > maxY) return null;
+  if (pB[0] < minX || pB[0] > maxX || pB[1] < minY || pB[1] > maxY) return null;
+
+  var comps = opts.comps || doc.comps || [];
+  var wires = opts.wires || doc.wires || [];
+  var dirA = opts.dirA || null;
+  var dirB = opts.dirB || null;
+  var allowTouchA = !!opts.allowTouchA;
+  var allowTouchB = !!opts.allowTouchB;
+
+  var obstacles = comps.map(function (c) { return SL.compObstacleRect(c); });
+  var otherTerms = {};
+  comps.forEach(function (c) {
+    SL.terminals(c).forEach(function (t) {
+      if ((t[0] === pA[0] && t[1] === pA[1]) || (t[0] === pB[0] && t[1] === pB[1])) return;
+      otherTerms[t[0] + "," + t[1]] = t;
+    });
+  });
+  var otherTermList = Object.keys(otherTerms).map(function (k) { return otherTerms[k]; });
+
+  // Neither endpoint may lie inside a component body obstacle or on another terminal
+  for (var oi = 0; oi < obstacles.length; oi++) {
+    var ob = obstacles[oi];
+    if (pA[0] >= ob.x0 && pA[0] <= ob.x1 && pA[1] >= ob.y0 && pA[1] <= ob.y1) return null;
+    if (pB[0] >= ob.x0 && pB[0] <= ob.x1 && pB[1] >= ob.y0 && pB[1] <= ob.y1) return null;
+  }
+
+  function isEndA(p) { return p[0] === pA[0] && p[1] === pA[1]; }
+  function isEndB(p) { return p[0] === pB[0] && p[1] === pB[1]; }
+  function isAllowedWireTouch(p) {
+    return (allowTouchA && isEndA(p)) || (allowTouchB && isEndB(p));
+  }
+
+  function segValid(a, b) {
+    if (a[0] !== b[0] && a[1] !== b[1]) return null; // must be orthogonal
+    if (a[0] === b[0] && a[1] === b[1]) return null;
+    var horiz = a[1] === b[1];
+    var x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
+    var y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+    if (x0 < minX || x1 > maxX || y0 < minY || y1 > maxY) return null;
+
+    var i, r, t, w, wx0, wx1, wy0, wy1, crossings = 0;
+    for (i = 0; i < obstacles.length; i++) {
+      r = obstacles[i];
+      if (horiz) {
+        if (a[1] >= r.y0 && a[1] <= r.y1 && x1 >= r.x0 && x0 <= r.x1) return null;
+      } else {
+        if (a[0] >= r.x0 && a[0] <= r.x1 && y1 >= r.y0 && y0 <= r.y1) return null;
+      }
+    }
+    for (i = 0; i < otherTermList.length; i++) {
+      t = otherTermList[i];
+      if (horiz) {
+        if (t[1] === a[1] && t[0] >= x0 && t[0] <= x1) return null;
+      } else {
+        if (t[0] === a[0] && t[1] >= y0 && t[1] <= y1) return null;
+      }
+    }
+    for (i = 0; i < wires.length; i++) {
+      w = wires[i];
+      wx0 = Math.min(w.a[0], w.b[0]); wx1 = Math.max(w.a[0], w.b[0]);
+      wy0 = Math.min(w.a[1], w.b[1]); wy1 = Math.max(w.a[1], w.b[1]);
+      var wHoriz = w.a[1] === w.b[1];
+      if (horiz && wHoriz) {
+        if (a[1] === w.a[1]) {
+          var ox0 = Math.max(x0, wx0), ox1 = Math.min(x1, wx1);
+          if (ox0 < ox1) return null; // collinear overlap
+          if (ox0 === ox1 && !isAllowedWireTouch([ox0, a[1]])) return null;
+        }
+      } else if (!horiz && !wHoriz) {
+        if (a[0] === w.a[0]) {
+          var oy0 = Math.max(y0, wy0), oy1 = Math.min(y1, wy1);
+          if (oy0 < oy1) return null; // collinear overlap
+          if (oy0 === oy1 && !isAllowedWireTouch([a[0], oy0])) return null;
+        }
+      } else {
+        var ix = horiz ? w.a[0] : a[0];
+        var iy = horiz ? a[1] : w.a[1];
+        var onSeg = horiz ? (ix >= x0 && ix <= x1) : (iy >= y0 && iy <= y1);
+        var onW = wHoriz ? (ix >= wx0 && ix <= wx1) : (iy >= wy0 && iy <= wy1);
+        if (onSeg && onW) {
+          var ip = [ix, iy];
+          if (isAllowedWireTouch(ip)) continue;
+          var segInterior = horiz ? (ix > x0 && ix < x1) : (iy > y0 && iy < y1);
+          var wInterior = wHoriz ? (ix > wx0 && ix < wx1) : (iy > wy0 && iy < wy1);
+          if (!segInterior || !wInterior) return null; // corner or T-touch on existing wire
+          if (SL.hasJunction(doc, ip)) return null;
+          crossings++;
+        }
+      }
+    }
+    return { len: (x1 - x0) + (y1 - y0), crossings: crossings };
+  }
+
+  function simplify(pts) {
+    var out = [];
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (out.length && out[out.length - 1][0] === p[0] && out[out.length - 1][1] === p[1]) continue;
+      if (out.length >= 2) {
+        var p1 = out[out.length - 2], p2 = out[out.length - 1];
+        if ((p1[0] === p2[0] && p2[0] === p[0]) || (p1[1] === p2[1] && p2[1] === p[1])) {
+          // Ensure no 180-degree foldback
+          out[out.length - 1] = p;
+          continue;
+        }
+      }
+      out.push(p);
+    }
+    return out;
+  }
+
+  var MAX_TURNS = 4;
+
+  function evalRoute(rawPts, symPenalty) {
+    var pts = simplify(rawPts);
+    var nSegs = pts.length - 1;
+    if (nSegs < 1 || nSegs - 1 > MAX_TURNS) return null;
+    var uA = [Math.sign(pts[1][0] - pts[0][0]), Math.sign(pts[1][1] - pts[0][1])];
+    var uB = [Math.sign(pts[nSegs - 1][0] - pts[nSegs][0]), Math.sign(pts[nSegs - 1][1] - pts[nSegs][1])];
+    if (dirA && uA[0] === -dirA[0] && uA[1] === -dirA[1]) return null;
+    if (dirB && uB[0] === -dirB[0] && uB[1] === -dirB[1]) return null;
+
+    var totalLen = 0, totalCross = 0, i, j;
+    for (i = 0; i < nSegs; i++) {
+      // Reject 180-degree reversals after simplify
+      if (i > 0) {
+        var dPrev = [Math.sign(pts[i][0] - pts[i - 1][0]), Math.sign(pts[i][1] - pts[i - 1][1])];
+        var dCur = [Math.sign(pts[i + 1][0] - pts[i][0]), Math.sign(pts[i + 1][1] - pts[i][1])];
+        if (dPrev[0] === -dCur[0] && dPrev[1] === -dCur[1]) return null;
+      }
+      var sv = segValid(pts[i], pts[i + 1]);
+      if (!sv) return null;
+      totalLen += sv.len;
+      totalCross += sv.crossings;
+    }
+    // Check non-adjacent segments don't touch/intersect each other
+    for (i = 0; i < nSegs; i++) {
+      for (j = i + 2; j < nSegs; j++) {
+        var a1 = pts[i], a2 = pts[i + 1], b1 = pts[j], b2 = pts[j + 1];
+        var ax0 = Math.min(a1[0], a2[0]), ax1 = Math.max(a1[0], a2[0]);
+        var ay0 = Math.min(a1[1], a2[1]), ay1 = Math.max(a1[1], a2[1]);
+        var bx0 = Math.min(b1[0], b2[0]), bx1 = Math.max(b1[0], b2[0]);
+        var by0 = Math.min(b1[1], b2[1]), by1 = Math.max(b1[1], b2[1]);
+        if (Math.max(ax0, bx0) <= Math.min(ax1, bx1) && Math.max(ay0, by0) <= Math.min(ay1, by1)) return null;
+      }
+    }
+    var turns = nSegs - 1;
+    var score = turns * 1000 + totalLen + totalCross * 300 + (symPenalty || 0);
+    if (dirA && (uA[0] !== dirA[0] || uA[1] !== dirA[1])) score += 1200;
+    if (dirB && (uB[0] !== dirB[0] || uB[1] !== dirB[1])) score += 1200;
+    return { pts: pts, score: score };
+  }
+
+  var best = null;
+  function tryCandidate(pts, symPenalty) {
+    var r = evalRoute(pts, symPenalty);
+    if (r && (!best || r.score < best.score)) best = r;
+  }
+
+  // 0 turns (straight)
+  if (pA[0] === pB[0] || pA[1] === pB[1]) {
+    tryCandidate([pA, pB], 0);
+    if (best && best.score < 1000) return best.pts;
+  }
+
+  // 1 turn (L-shape)
+  tryCandidate([pA, [pB[0], pA[1]], pB], 0);
+  tryCandidate([pA, [pA[0], pB[1]], pB], 0);
+
+  // Build sorted grid coordinates for Z / U routes
+  var midY = SL.snap((pA[1] + pB[1]) / 2);
+  var midX = SL.snap((pA[0] + pB[0]) / 2);
+  var ys = [], xs = [], y, x;
+  for (y = SL.snap(minY + SL.GRID); y <= maxY - SL.GRID; y += SL.GRID) ys.push(y);
+  for (x = SL.snap(minX + SL.GRID); x <= maxX - SL.GRID; x += SL.GRID) xs.push(x);
+  ys.sort(function (a, b) { return Math.abs(a - midY) - Math.abs(b - midY); });
+  xs.sort(function (a, b) { return Math.abs(a - midX) - Math.abs(b - midX); });
+
+  // 2 turns (V-H-V and H-V-H)
+  for (var yi = 0; yi < ys.length; yi++) {
+    y = ys[yi];
+    tryCandidate([pA, [pA[0], y], [pB[0], y], pB], Math.abs(y - midY) * 0.1);
+  }
+  for (var xi = 0; xi < xs.length; xi++) {
+    x = xs[xi];
+    tryCandidate([pA, [x, pA[1]], [x, pB[1]], pB], Math.abs(x - midX) * 0.1);
+  }
+  if (best && best.score < 3200) return best.pts;
+
+  // 3 and 4 turns: axial stubs from pA and/or pB connected via L or Z/U routes
+  var stubs = [SL.GRID, SL.GRID * 2, SL.GRID * 3];
+  var aStarts = [pA];
+  var bEnds = [pB];
+  if (dirA) stubs.forEach(function (s) { aStarts.push([pA[0] + dirA[0] * s, pA[1] + dirA[1] * s]); });
+  if (dirB) stubs.forEach(function (s) { bEnds.push([pB[0] + dirB[0] * s, pB[1] + dirB[1] * s]); });
+
+  for (var ai = 0; ai < aStarts.length; ai++) {
+    for (var bi = 0; bi < bEnds.length; bi++) {
+      if (ai === 0 && bi === 0) continue;
+      var qA = aStarts[ai], qB = bEnds[bi];
+      var pre = ai === 0 ? [pA] : [pA, qA];
+      var post = bi === 0 ? [pB] : [qB, pB];
+      tryCandidate(pre.concat([[qB[0], qA[1]]], post), 0);
+      tryCandidate(pre.concat([[qA[0], qB[1]]], post), 0);
+      for (yi = 0; yi < Math.min(ys.length, 30); yi++) {
+        y = ys[yi];
+        tryCandidate(pre.concat([[qA[0], y], [qB[0], y]], post), Math.abs(y - midY) * 0.1);
+      }
+      for (xi = 0; xi < Math.min(xs.length, 30); xi++) {
+        x = xs[xi];
+        tryCandidate(pre.concat([[x, qA[1]], [x, qB[1]]], post), Math.abs(x - midX) * 0.1);
+      }
+    }
+  }
+
+  return best ? best.pts : null;
+};
+
+/**
+ * Move selected items in doc by (dx, dy), redrawing orthogonal connections (90° turns only)
+ * for any connected element that moves. If a connection cannot be remade, its wire is removed
+ * and { disconnected: true, names: [...] } is returned.
+ */
+SL.moveItems = function (doc, selSet, dx, dy) {
+  if (!dx && !dy) return { disconnected: false, names: [] };
+  var key = function (p) { return p[0] + "," + p[1]; };
+  var movedComps = doc.comps.filter(function (c) { return selSet.has(c.id); });
+
+  if (!movedComps.length) {
+    // Only wires, texts, or drawings selected
+    doc.wires.forEach(function (w) {
+      if (selSet.has(w.id)) {
+        w.a = [w.a[0] + dx, w.a[1] + dy];
+        w.b = [w.b[0] + dx, w.b[1] + dy];
+      }
+    });
+    doc.texts.forEach(function (x) { if (selSet.has(x.id)) { x.x += dx; x.y += dy; } });
+    doc.drawings.forEach(function (x) {
+      if (selSet.has(x.id)) {
+        x.a = [x.a[0] + dx, x.a[1] + dy];
+        x.b = [x.b[0] + dx, x.b[1] + dy];
+      }
+    });
+    doc.wires = doc.wires.filter(function (w) { return w.a[0] !== w.b[0] || w.a[1] !== w.b[1]; });
+    SL.cleanJunctions(doc);
+    return { disconnected: false, names: [] };
+  }
+
+  // Record old terminal positions and outward directions before moving components
+  var movedTermMap = {}, statTermMap = {};
+  doc.comps.forEach(function (c) {
+    var tds = SL.terminalsWithDir(c);
+    if (selSet.has(c.id)) {
+      tds.forEach(function (td) {
+        movedTermMap[key(td.pos)] = {
+          oldPos: td.pos,
+          newPos: [td.pos[0] + dx, td.pos[1] + dy],
+          dir: td.dir,
+          comp: c,
+        };
+      });
+    } else {
+      tds.forEach(function (td) {
+        statTermMap[key(td.pos)] = {
+          pos: td.pos,
+          dir: td.dir,
+          comp: c,
+        };
+      });
+    }
+  });
+
+  // Split wires at T-junctions, active junctions, and component terminals so chains are explicit
+  var splitPts = [];
+  var splitSeen = {};
+  function addSplitPt(p) {
+    var k = key(p);
+    if (!splitSeen[k]) { splitSeen[k] = true; splitPts.push([p[0], p[1]]); }
+  }
+  Object.keys(movedTermMap).forEach(function (k) { addSplitPt(movedTermMap[k].oldPos); });
+  Object.keys(statTermMap).forEach(function (k) { addSplitPt(statTermMap[k].pos); });
+  SL.junctionPoints(doc).forEach(addSplitPt);
+
+  var segments = [];
+  (doc.wires || []).forEach(function (w) {
+    var a = w.a, b = w.b;
+    if (a[0] === b[0] && a[1] === b[1]) return;
+    if (a[0] !== b[0] && a[1] !== b[1]) {
+      segments.push({ a: [a[0], a[1]], b: [b[0], b[1]] });
+      return;
+    }
+    var horiz = a[1] === b[1];
+    var cuts = [a, b];
+    splitPts.forEach(function (p) {
+      if (SL.wireInterior(w, p)) cuts.push([p[0], p[1]]);
+    });
+    cuts.sort(function (p1, p2) { return horiz ? p1[0] - p2[0] : p1[1] - p2[1]; });
+    for (var i = 0; i < cuts.length - 1; i++) {
+      if (cuts[i][0] !== cuts[i + 1][0] || cuts[i][1] !== cuts[i + 1][1]) {
+        segments.push({ a: cuts[i], b: cuts[i + 1] });
+      }
+    }
+  });
+
+  // Merge collinear contiguous segments when their shared vertex is just a pass-through
+  var merged = true;
+  while (merged) {
+    merged = false;
+    var degCount = {};
+    segments.forEach(function (s) {
+      var ka = key(s.a), kb = key(s.b);
+      degCount[ka] = (degCount[ka] || 0) + 1;
+      degCount[kb] = (degCount[kb] || 0) + 1;
+    });
+    for (var i = 0; i < segments.length && !merged; i++) {
+      for (var j = i + 1; j < segments.length && !merged; j++) {
+        var s1 = segments[i], s2 = segments[j];
+        var h1 = s1.a[1] === s1.b[1], h2 = s2.a[1] === s2.b[1];
+        if (h1 !== h2) continue;
+        var shared = null, o1 = null, o2 = null;
+        if (key(s1.a) === key(s2.a)) { shared = s1.a; o1 = s1.b; o2 = s2.b; }
+        else if (key(s1.a) === key(s2.b)) { shared = s1.a; o1 = s1.b; o2 = s2.a; }
+        else if (key(s1.b) === key(s2.a)) { shared = s1.b; o1 = s1.a; o2 = s2.b; }
+        else if (key(s1.b) === key(s2.b)) { shared = s1.b; o1 = s1.a; o2 = s2.a; }
+        if (!shared) continue;
+        var ks = key(shared);
+        if (movedTermMap[ks] || statTermMap[ks] || SL.hasJunction(doc, shared)) continue;
+        // Do not merge if a perpendicular segment ends at shared (T-junction)
+        var perpEndsAtShared = segments.some(function (s3, idx) {
+          if (idx === i || idx === j) return false;
+          return key(s3.a) === ks || key(s3.b) === ks;
+        });
+        if (perpEndsAtShared) continue;
+        segments[i] = { a: o1, b: o2 };
+        segments.splice(j, 1);
+        merged = true;
+      }
+    }
+  }
+
+  // Build adjacency graph of segments
+  var adj = {}, ptByKey = {};
+  function addNode(p) {
+    var k = key(p);
+    if (!adj[k]) { adj[k] = []; ptByKey[k] = [p[0], p[1]]; }
+    return k;
+  }
+  segments.forEach(function (s, idx) {
+    var ka = addNode(s.a), kb = addNode(s.b);
+    adj[ka].push({ to: kb, edge: idx });
+    adj[kb].push({ to: ka, edge: idx });
+  });
+
+  function isAnchor(k) {
+    if (movedTermMap[k] || statTermMap[k]) return true;
+    var deg = adj[k] ? adj[k].length : 0;
+    return deg !== 2 || SL.hasJunction(doc, ptByKey[k]);
+  }
+
+  // Decompose into maximal chains between anchor vertices
+  var visitedEdge = {}, chains = [];
+  Object.keys(adj).forEach(function (k) {
+    if (!isAnchor(k)) return;
+    adj[k].forEach(function (step) {
+      if (visitedEdge[step.edge]) return;
+      var pts = [ptByKey[k]], cur = k, nxt = step;
+      while (nxt) {
+        visitedEdge[nxt.edge] = true;
+        cur = nxt.to;
+        pts.push(ptByKey[cur]);
+        if (isAnchor(cur)) break;
+        var nextSteps = adj[cur].filter(function (x) { return !visitedEdge[x.edge]; });
+        nxt = nextSteps.length ? nextSteps[0] : null;
+      }
+      chains.push({ u: k, v: cur, pts: pts });
+    });
+  });
+
+  // Determine which non-terminal anchors move (connected components of chains that only touch moved terminals)
+  var compAdj = {};
+  chains.forEach(function (ch) {
+    if (!compAdj[ch.u]) compAdj[ch.u] = [];
+    if (!compAdj[ch.v]) compAdj[ch.v] = [];
+    compAdj[ch.u].push(ch.v);
+    compAdj[ch.v].push(ch.u);
+  });
+  var anchorMoves = {};
+  var seenAnchor = {};
+  Object.keys(adj).forEach(function (startK) {
+    if (!isAnchor(startK) || seenAnchor[startK]) return;
+    var q = [startK], group = [], hasMoved = false, hasStat = false;
+    seenAnchor[startK] = true;
+    while (q.length) {
+      var cur = q.shift();
+      group.push(cur);
+      if (movedTermMap[cur] && !statTermMap[cur]) hasMoved = true;
+      if (statTermMap[cur]) hasStat = true;
+      (compAdj[cur] || []).forEach(function (nb) {
+        if (!seenAnchor[nb]) { seenAnchor[nb] = true; q.push(nb); }
+      });
+    }
+    group.forEach(function (ak) {
+      if (statTermMap[ak]) anchorMoves[ak] = false;
+      else if (movedTermMap[ak]) anchorMoves[ak] = true;
+      else anchorMoves[ak] = hasMoved && !hasStat;
+    });
+  });
+
+  // Move selected components, texts, drawings
+  doc.comps.forEach(function (c) { if (selSet.has(c.id)) { c.x += dx; c.y += dy; } });
+  doc.texts.forEach(function (x) { if (selSet.has(x.id)) { x.x += dx; x.y += dy; } });
+  doc.drawings.forEach(function (x) {
+    if (selSet.has(x.id)) {
+      x.a = [x.a[0] + dx, x.a[1] + dy];
+      x.b = [x.b[0] + dx, x.b[1] + dy];
+    }
+  });
+
+  // Check if any moved component collides with another component or is out of page bounds
+  var ps = (SL.PAGE_SIZES && doc.page && SL.PAGE_SIZES[doc.page.size]) || { w: 1485, h: 1050 };
+  var margin = (doc.page && doc.page.border) ? 25 : 0;
+  var invalidMovedComp = {};
+  movedComps.forEach(function (mc) {
+    var mr = SL.compRect(mc);
+    if (mr.x0 < margin || mr.y0 < margin || mr.x1 > ps.w - margin || mr.y1 > ps.h - margin) {
+      invalidMovedComp[mc.id] = true;
+    }
+    var mob = SL.compObstacleRect(mc);
+    var mTerms = SL.terminals(mc);
+    doc.comps.forEach(function (oc) {
+      if (oc.id === mc.id) return;
+      var oob = SL.compObstacleRect(oc);
+      if (mob.x0 <= oob.x1 && mob.x1 >= oob.x0 && mob.y0 <= oob.y1 && mob.y1 >= oob.y0) {
+        invalidMovedComp[mc.id] = true;
+      }
+      var oTerms = SL.terminals(oc);
+      mTerms.forEach(function (mt) {
+        if (mt[0] >= oob.x0 && mt[0] <= oob.x1 && mt[1] >= oob.y0 && mt[1] <= oob.y1) invalidMovedComp[mc.id] = true;
+        oTerms.forEach(function (ot) {
+          if (mt[0] === ot[0] && mt[1] === ot[1]) invalidMovedComp[mc.id] = true;
+        });
+      });
+    });
+  });
+
+  var staticWires = [];
+  var bothMovedChains = [];
+  var rerouteChains = [];
+
+  chains.forEach(function (ch) {
+    var uMoves = !!anchorMoves[ch.u];
+    var vMoves = !!anchorMoves[ch.v];
+    if (!uMoves && !vMoves) {
+      for (var i = 0; i < ch.pts.length - 1; i++) {
+        staticWires.push({ a: ch.pts[i], b: ch.pts[i + 1] });
+      }
+    } else if (uMoves && vMoves) {
+      bothMovedChains.push(ch);
+    } else {
+      rerouteChains.push(ch);
+    }
+  });
+
+  var disconnected = false;
+  var disconnectedNames = [];
+  function recordDisconnect(comp) {
+    disconnected = true;
+    if (comp && comp.name && disconnectedNames.indexOf(comp.name) < 0) {
+      disconnectedNames.push(comp.name);
+    }
+  }
+
+  // Handle chains where both endpoints move together
+  bothMovedChains.forEach(function (ch) {
+    var uTerm = movedTermMap[ch.u], vTerm = movedTermMap[ch.v];
+    var uComp = uTerm && uTerm.comp, vComp = vTerm && vTerm.comp;
+    if ((uComp && invalidMovedComp[uComp.id]) || (vComp && invalidMovedComp[vComp.id])) {
+      recordDisconnect(uComp || vComp);
+      return;
+    }
+    var shiftedPts = ch.pts.map(function (p) { return [p[0] + dx, p[1] + dy]; });
+    // Check if shifted path collides with any stationary component/terminal/wire
+    var pA = shiftedPts[0], pB = shiftedPts[shiftedPts.length - 1];
+    var routed = SL.routeOrthogonal(doc, pA, pB, {
+      dirA: uTerm ? uTerm.dir : null,
+      dirB: vTerm ? vTerm.dir : null,
+      wires: staticWires,
+      comps: doc.comps,
+    });
+    if (!routed) {
+      recordDisconnect(uComp || vComp);
+      return;
+    }
+    // Keep shiftedPts if all segments are orthogonal and valid, else use routed
+    var usePts = shiftedPts;
+    var okShift = true;
+    for (var i = 0; i < shiftedPts.length - 1; i++) {
+      var a = shiftedPts[i], b = shiftedPts[i + 1];
+      if (a[0] !== b[0] && a[1] !== b[1]) { okShift = false; break; }
+      var segCheck = SL.routeOrthogonal(doc, a, b, { wires: staticWires, comps: doc.comps });
+      if (!segCheck || segCheck.length !== 2) { okShift = false; break; }
+    }
+    if (!okShift) usePts = routed;
+    for (var k = 0; k < usePts.length - 1; k++) {
+      staticWires.push({ a: usePts[k], b: usePts[k + 1] });
+    }
+  });
+
+  // Handle chains with one stationary endpoint and one moved endpoint
+  function tryOrder(order) {
+    var tempWires = staticWires.slice();
+    var disc = 0, discComps = [], totalLen = 0;
+    order.forEach(function (ch) {
+      var uMoved = !!anchorMoves[ch.u];
+      var mKey = uMoved ? ch.u : ch.v;
+      var sKey = uMoved ? ch.v : ch.u;
+      var mTerm = movedTermMap[mKey];
+      var sTerm = statTermMap[sKey];
+      var mComp = mTerm ? mTerm.comp : null;
+      var pStat = ptByKey[sKey];
+      var pMoved = mTerm ? mTerm.newPos : [ptByKey[mKey][0] + dx, ptByKey[mKey][1] + dy];
+      if (mComp && invalidMovedComp[mComp.id]) {
+        disc++;
+        discComps.push(mComp);
+        return;
+      }
+      var sIsWireAnchor = !sTerm && adj[sKey] && adj[sKey].length >= 2;
+      var pts = SL.routeOrthogonal(doc, pStat, pMoved, {
+        dirA: sTerm ? sTerm.dir : null,
+        dirB: mTerm ? mTerm.dir : null,
+        allowTouchA: sIsWireAnchor,
+        allowTouchB: false,
+        wires: tempWires,
+        comps: doc.comps,
+      });
+      if (!pts) {
+        disc++;
+        discComps.push(mComp);
+      } else {
+        for (var i = 0; i < pts.length - 1; i++) {
+          tempWires.push({ a: pts[i], b: pts[i + 1] });
+          totalLen += Math.abs(pts[i + 1][0] - pts[i][0]) + Math.abs(pts[i + 1][1] - pts[i][1]);
+        }
+      }
+    });
+    return { wires: tempWires, disc: disc, discComps: discComps, totalLen: totalLen };
+  }
+
+  if (rerouteChains.length) {
+    var forwardRes = tryOrder(rerouteChains);
+    var bestRes = forwardRes;
+    if (rerouteChains.length > 1) {
+      var revRes = tryOrder(rerouteChains.slice().reverse());
+      if (revRes.disc < bestRes.disc || (revRes.disc === bestRes.disc && revRes.totalLen < bestRes.totalLen)) {
+        bestRes = revRes;
+      }
+    }
+    staticWires = bestRes.wires;
+    bestRes.discComps.forEach(recordDisconnect);
+  }
+
+  // Rebuild doc.wires from staticWires
+  doc.wires = [];
+  staticWires.forEach(function (w) { SL.addWire(doc, w.a, w.b); });
+  SL.cleanJunctions(doc);
+
+  return { disconnected: disconnected, names: disconnectedNames };
 };
 
 SL.nextName = function (doc, kind) {

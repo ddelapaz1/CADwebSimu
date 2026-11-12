@@ -150,5 +150,87 @@ test("file format matches the Mac app", () => {
   eq(d.comps[0].kind, "FeedL123");
 });
 
+test("Connections submenu contains Cable, Punt de connexió, and Born", () => {
+  const connItems = SL.KIND_LIST.filter((k) => k.cat === "Connections").map((k) => k.id);
+  eq(connItems, ["Wire", "Junction", "Terminal"]);
+  eq(SL.KINDS.Wire.label, "Cable");
+  eq(SL.KINDS.Junction.label, "Punt de connexió");
+  eq(SL.buildSymbol("Wire", {}).prims.length > 0, true);
+  eq(SL.buildSymbol("Junction", {}).prims.length > 0, true);
+});
+
+test("crossing conductors do not connect by default; Punt de connexió toggles connection", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedL", 150, 60, 0, "");   // terminal at (150, 90)
+  SL.makeComp(d, "FeedN", 60, 150, 3, "");   // rot 3 -> terminal at (90, 150)
+  // Vertical wire L from (150, 90) to (150, 240)
+  SL.addWire(d, [150, 90], [150, 240]);
+  // Horizontal wire N from (90, 150) to (240, 150) crossing at (150, 150)
+  SL.addWire(d, [90, 150], [240, 150]);
+
+  eq(SL.isConnectedJunction(d, [150, 150]), false, "not connected by default");
+  eq(SL.junctionPoints(d), [], "no dot by default");
+  eq(new SL.Sim(d).tick(d, 0.1), null, "no short circuit when crossing without junction");
+
+  // Even if drawn as two collinear segments meeting on the vertical wire, still no connection by default
+  const d2 = SL.newDoc();
+  SL.makeComp(d2, "FeedL", 150, 60, 0, "");
+  SL.makeComp(d2, "FeedN", 60, 150, 3, "");
+  SL.addWire(d2, [150, 90], [150, 240]);
+  SL.addWire(d2, [90, 150], [150, 150]);
+  SL.addWire(d2, [150, 150], [240, 150]);
+  eq(SL.isConnectedJunction(d2, [150, 150]), false, "split crossing not connected by default");
+  eq(new SL.Sim(d2).tick(d2, 0.1), null, "no short circuit on split crossing");
+
+  // Click Punt de connexió at (150, 150) -> connects them (L + N = Short)
+  const r1 = SL.toggleJunction(d, [150, 150]);
+  eq([r1.changed, r1.connected], [true, true], "connected after first click");
+  eq(SL.isConnectedJunction(d, [150, 150]), true);
+  eq(SL.junctionPoints(d), [[150, 150]]);
+  eq(new SL.Sim(d).tick(d, 0.1), "Short", "connected crossing causes L-N short");
+
+  // Click again at (150, 150) -> undoes connection
+  const r2 = SL.toggleJunction(d, [150, 150]);
+  eq([r2.changed, r2.connected], [true, false], "disconnected after second click");
+  eq(SL.isConnectedJunction(d, [150, 150]), false);
+  eq(SL.junctionPoints(d), []);
+  eq(new SL.Sim(d).tick(d, 0.1), null, "no short after undoing connection");
+});
+
+test("moving connected element redraws wire with 90° turns only", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedL", 300, 120, 0, ""); // terminal at (300, 150)
+  const lamp = SL.makeComp(d, "Lamp", 300, 210, 0, "-H1"); // terminals at (300, 210) and (300, 270)
+  SL.makeComp(d, "FeedN", 300, 360, 2, ""); // terminal at (300, 330)
+  SL.addWire(d, [300, 150], [300, 210]);
+  SL.addWire(d, [300, 270], [300, 330]);
+
+  // Move lamp horizontally by +90 and vertically by +15
+  const res = SL.moveItems(d, new Set([lamp.id]), 90, 15);
+  eq(res.disconnected, false, "connection remade");
+  eq(d.wires.length > 0, true, "wires exist");
+  // Every wire segment must be strictly horizontal or vertical (90° turns only)
+  d.wires.forEach((w) => {
+    const orthogonal = w.a[0] === w.b[0] || w.a[1] === w.b[1];
+    eq(orthogonal, true, "segment is orthogonal: " + JSON.stringify(w));
+  });
+  // Lamp should still be electrically connected and energized in simulation
+  const s = new SL.Sim(d);
+  eq(s.tick(d, 0.1), null);
+  eq(s.st[lamp.id].energized, true, "lamp remains energized after orthogonal reroute");
+});
+
+test("moving connected element to impossible position deletes wire and reports disconnection", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedL", 300, 120, 0, ""); // terminal at (300, 150)
+  const fuse = SL.makeComp(d, "Fuse1", 300, 210, 0, "-F1"); // terminals at (300, 210), (300, 270)
+  SL.addWire(d, [300, 150], [300, 210]);
+
+  // Move fuse directly on top of FeedL so connection is impossible
+  const res = SL.moveItems(d, new Set([fuse.id]), 0, -90);
+  eq(res.disconnected, true, "reports disconnection");
+  eq(d.wires.length, 0, "conductor was removed");
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");

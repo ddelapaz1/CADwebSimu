@@ -254,6 +254,7 @@
     ["comps", "wires", "texts", "drawings"].forEach(function (k) {
       t.doc[k] = t.doc[k].filter(function (o) { return !A.sel.has(o.id); });
     });
+    if (SL.cleanJunctions) SL.cleanJunctions(t.doc);
     A.sel.clear(); A.changed();
   };
   A.copy = function () {
@@ -322,6 +323,7 @@
     if (t.t !== "place") { A.placeRot = 0; A.placeMirror = false; }
     var msg = {
       wire: "Cable: feu clic a l'inici i a cada cantonada; acaba en arribar a un terminal o a un altre cable (Esc cancel·la)",
+      junction: "Punt de connexió: feu clic sobre l'encreuament de dos conductors per connectar-los o desconnectar-los (Esc acaba)",
       text: "Text: feu clic on vulgueu escriure",
       shape: "Dibuix: arrossegueu per dibuixar",
       zoomwin: "Zoom finestra: arrossegueu un rectangle",
@@ -674,9 +676,14 @@
     $("toolbar1").hidden = $("toolbar2").hidden = !A.showToolbar;
   }
 
+  function activeSymKind() {
+    if (A.tool.t === "place") return SL.KINDS[A.tool.kind] || null;
+    return SL.KIND_LIST.find(function (k) { return k.tool && k.tool === A.tool.t; }) || null;
+  }
+
   function makeSymBtn(k, idx, extraVars) {
     var cv = el("canvas");
-    var isOn = A.tool.t === "place" && A.tool.kind === k.id;
+    var isOn = k.tool ? A.tool.t === k.tool : (A.tool.t === "place" && A.tool.kind === k.id);
     var b = el("button", { class: "symbtn" + (isOn ? " on" : "") }, [cv]);
     b.style.setProperty("--i", String(idx));
     if (extraVars) {
@@ -687,7 +694,7 @@
       e.stopPropagation();
       hideTip();
       if (A.tab().mode === "edit") {
-        A.setTool({ t: "place", kind: k.id });
+        A.setTool(k.tool ? { t: k.tool } : { t: "place", kind: k.id });
         A.closeSymDeploy();
       }
       $("canvas").focus();
@@ -738,7 +745,7 @@
   function updateCatLabel() {
     var lbl = $("catlabel");
     if (!lbl) return;
-    var activeKind = A.tool.t === "place" && SL.KINDS[A.tool.kind];
+    var activeKind = activeSymKind();
     var openCatObj = A.openCat && SL.CATS.find(function (x) { return x.id === A.openCat; });
     if (openCatObj && activeKind && activeKind.cat === openCatObj.id) {
       lbl.textContent = openCatObj.label + " › " + activeKind.label;
@@ -756,7 +763,7 @@
     var c = $("catbar"), edit = A.tab().mode === "edit";
     c.innerHTML = "";
     c.classList.toggle("sym-disabled", !edit);
-    var activeKind = A.tool.t === "place" && SL.KINDS[A.tool.kind];
+    var activeKind = activeSymKind();
     SL.CATS.forEach(function (cat) {
       var cv = el("canvas");
       var isOpen = A.openCat === cat.id;
@@ -977,7 +984,9 @@
         ["Rectangle", function () { A.setTool({ t: "shape", kind: "Rect" }); }], ["El·lipse", function () { A.setTool({ t: "shape", kind: "Ellipse" }); }],
         ["Rectangle acolorit", function () { A.setTool({ t: "shape", kind: "FilledRect" }); }],
         ["El·lipse acolorida", function () { A.setTool({ t: "shape", kind: "FilledEllipse" }); }],
-        ["Text", function () { A.setTool({ t: "text" }); }], ["Cable", function () { A.setTool({ t: "wire" }); }]]],
+        ["Text", function () { A.setTool({ t: "text" }); }],
+        ["Cable", function () { A.setTool({ t: "wire" }); }],
+        ["Punt de connexió", function () { A.setTool({ t: "junction" }); }]]],
       ["Mode", [
         ["Edició", A.stopSim], ["Simulació", function () { A.startSim(false); }, "F5"], ["Pausa", A.pause], ["Pas a pas", A.step],
         ["Simula el document", function () { A.startSim(false); }], ["Simula tots els documents", function () { A.startSim(true); }]]],

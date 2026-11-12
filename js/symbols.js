@@ -201,6 +201,16 @@
         s.poly([[6, 22], [16, 14], [16, 46], [6, 38]], true);
         s.term(0, 0, "X1"); s.term(0, 60, "X2");
         break;
+      case "Wire":
+        s.l([0, 3], [0, 27]); s.l([0, 27], [24, 27]);
+        s.c([0, 3], 3, "rgb(220,53,69)");
+        s.c([24, 27], 3, "rgb(220,53,69)");
+        break;
+      case "Junction":
+        s.l([-15, 0], [15, 0]);
+        s.l([0, -15], [0, 15]);
+        s.c([0, 0], 4.5, "#1a1a1a");
+        break;
       case "Terminal":
         s.l([0, 0], [0, 10]); s.l([0, 20], [0, 30]);
         s.c([0, 15], 5, "rgb(255,255,255)");
@@ -243,6 +253,20 @@
     });
   };
 
+  /** World-space terminals with outward unit vector: [{pos:[x,y], dir:[dx,dy]}]. */
+  SL.terminalsWithDir = function (c) {
+    var sym = SL.buildSymbol(c.kind, {});
+    return sym.terms.map(function (t) {
+      var p = SL.xform(t, c.rot, c.mirror);
+      var localDir = t[1] === 0 ? [0, -1] : [0, 1];
+      var d = SL.xform(localDir, c.rot, c.mirror);
+      return {
+        pos: [Math.round(p[0]) + c.x, Math.round(p[1]) + c.y],
+        dir: [Math.round(d[0]), Math.round(d[1])],
+      };
+    });
+  };
+
   /** World-space bounding box {x0,y0,x1,y1}. */
   SL.compRect = function (c) {
     var bb = SL.symBBox(SL.buildSymbol(c.kind, {}));
@@ -255,5 +279,11 @@
       x1: Math.max.apply(null, pts.map(function (p) { return p[0]; })),
       y1: Math.max.apply(null, pts.map(function (p) { return p[1]; })),
     };
+  };
+
+  /** Interior body obstacle box (shrunk slightly from terminals so terminal leads can exit). */
+  SL.compObstacleRect = function (c) {
+    var r = SL.compRect(c);
+    return { x0: r.x0 + 2, y0: r.y0 + 2, x1: r.x1 - 2, y1: r.y1 - 2 };
   };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);

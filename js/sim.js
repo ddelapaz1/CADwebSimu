@@ -53,28 +53,97 @@
 
   function key(p) { return p[0] + "," + p[1]; }
 
-  /** Fixed connectivity: wires, T-junctions and terminal positions. */
+  /** Fixed connectivity: wires, T-junctions, explicit crossing junctions, and terminal positions. */
   function buildTopo(doc) {
-    var idx = {}, pts = [];
-    function get(p) { var k = key(p); if (!(k in idx)) { idx[k] = pts.length; pts.push(p); } return idx[k]; }
+    var idx = {}, hIdx = {}, vIdx = {}, pts = [], coordList = [], coordSeen = {};
+    function alloc(p) { var id = pts.length; pts.push(p); return id; }
+    function addCoord(p) {
+      var k = key(p);
+      if (coordSeen[k]) return;
+      coordSeen[k] = true;
+      coordList.push([p[0], p[1]]);
+      idx[k] = alloc(p);
+      hIdx[k] = alloc(p);
+      vIdx[k] = alloc(p);
+    }
     var terms = {};
-    doc.comps.forEach(function (c) { terms[c.id] = SL.terminals(c).map(get); });
-    doc.wires.forEach(function (w) { get(w.a); get(w.b); });
-    var d = new Dsu(pts.length);
-    doc.wires.forEach(function (w) { d.union(idx[key(w.a)], idx[key(w.b)]); });
-    var wireEnd = {};
-    doc.wires.forEach(function (w) { wireEnd[key(w.a)] = true; wireEnd[key(w.b)] = true; });
-    pts.forEach(function (p) {
-      if (!wireEnd[key(p)]) return;
-      doc.wires.forEach(function (w) { if (SL.wireInterior(w, p)) d.union(idx[key(p)], idx[key(w.a)]); });
+    doc.comps.forEach(function (c) {
+      var ts = SL.terminals(c);
+      ts.forEach(addCoord);
+      terms[c.id] = ts.map(function (p) { return idx[key(p)]; });
     });
+    var hs = [], vs = [];
+    doc.wires.forEach(function (w) {
+      addCoord(w.a);
+      addCoord(w.b);
+      if (w.a[1] === w.b[1]) hs.push(w);
+      else if (w.a[0] === w.b[0]) vs.push(w);
+    });
+    (doc.junctions || []).forEach(addCoord);
+    hs.forEach(function (h) {
+      var hx0 = Math.min(h.a[0], h.b[0]), hx1 = Math.max(h.a[0], h.b[0]), hy = h.a[1];
+      vs.forEach(function (v) {
+        var vy0 = Math.min(v.a[1], v.b[1]), vy1 = Math.max(v.a[1], v.b[1]), vx = v.a[0];
+        if (vx >= hx0 && vx <= hx1 && hy >= vy0 && hy <= vy1) addCoord([vx, hy]);
+      });
+    });
+
+    var d = new Dsu(pts.length);
+    var wireNode = {};
+    doc.wires.forEach(function (w) {
+      var ka = key(w.a), kb = key(w.b);
+      if (w.a[1] === w.b[1]) {
+        var y = w.a[1], x0 = Math.min(w.a[0], w.b[0]), x1 = Math.max(w.a[0], w.b[0]);
+        d.union(hIdx[ka], hIdx[kb]);
+        coordList.forEach(function (p) {
+          if (p[1] === y && p[0] >= x0 && p[0] <= x1) d.union(hIdx[key(p)], hIdx[ka]);
+        });
+        wireNode[w.id] = hIdx[ka];
+      } else if (w.a[0] === w.b[0]) {
+        var x = w.a[0], y0 = Math.min(w.a[1], w.b[1]), y1 = Math.max(w.a[1], w.b[1]);
+        d.union(vIdx[ka], vIdx[kb]);
+        coordList.forEach(function (p) {
+          if (p[0] === x && p[1] >= y0 && p[1] <= y1) d.union(vIdx[key(p)], vIdx[ka]);
+        });
+        wireNode[w.id] = vIdx[ka];
+      } else {
+        d.union(idx[ka], idx[kb]);
+        wireNode[w.id] = idx[ka];
+      }
+    });
+
+    coordList.forEach(function (p) {
+      var k = key(p), dirs = SL.wireDirsAt(doc, p);
+      if (dirs.h && !dirs.v) {
+        d.union(idx[k], hIdx[k]);
+      } else if (dirs.v && !dirs.h) {
+        d.union(idx[k], vIdx[k]);
+      } else if (dirs.h && dirs.v) {
+        var joinHV = false;
+        if (dirs.cross) joinHV = SL.hasJunction(doc, p);
+        else if (dirs.tee) joinHV = !SL.hasNoJunction(doc, p);
+        else joinHV = !SL.hasNoJunction(doc, p); // 2-way L-corner
+        if (joinHV) {
+          d.union(hIdx[k], vIdx[k]);
+          d.union(idx[k], hIdx[k]);
+        } else {
+          // Unjoined crossing: attach idx[k] only if a wire actually terminates here
+          var hEnd = hs.some(function (w) { return key(w.a) === k || key(w.b) === k; });
+          var vEnd = vs.some(function (w) { return key(w.a) === k || key(w.b) === k; });
+          if (hEnd && !vEnd) d.union(idx[k], hIdx[k]);
+          else if (vEnd && !hEnd) d.union(idx[k], vIdx[k]);
+        }
+      }
+    });
+
     var base = pts.map(function (_, i) { return d.find(i); });
-    return { idx: idx, pts: pts, base: base, terms: terms };
+    return { idx: idx, coordList: coordList, pts: pts, base: base, terms: terms, wireNode: wireNode };
   }
 
   function Sim(doc) {
     this.st = {};
     this.pot = {};
+    this.wirePot = {};
     this.fault = null;
     this.time = 0;
     var self = this;
@@ -153,7 +222,15 @@
       if (hasPE && hasLive && !fault) fault = "Earth";
     });
     this.pot = {};
-    for (i = 0; i < n; i++) this.pot[key(topo.pts[i])] = out[i];
+    this.wirePot = {};
+    topo.coordList.forEach(function (p) {
+      var k = key(p);
+      self.pot[k] = out[topo.idx[k]];
+    });
+    doc.wires.forEach(function (w) {
+      var wn = topo.wireNode[w.id];
+      if (wn != null) self.wirePot[w.id] = out[wn];
+    });
     return { out: out, roots: roots, fault: fault };
   };
 

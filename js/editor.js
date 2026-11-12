@@ -9,23 +9,28 @@
   /** Paint a tab's document. opts: {grid, sel:Set, dx, dy} */
   SL.drawDoc = function (r, t, opts) {
     var doc = t.doc, sim = t.mode !== "edit" && t.sim, sel = opts.sel, dx = opts.dx || 0, dy = opts.dy || 0;
+    if ((dx || dy) && sel && sel.size) {
+      doc = JSON.parse(JSON.stringify(t.doc));
+      SL.moveItems(doc, sel, dx, dy);
+      dx = 0; dy = 0;
+    }
     r.page(doc, opts.grid);
     function shifted(o, f) { return sel.has(o.id) && (dx || dy) ? f(JSON.parse(JSON.stringify(o))) : o; }
     doc.drawings.forEach(function (d) {
       r.drawing(shifted(d, function (o) { o.a = [o.a[0] + dx, o.a[1] + dy]; o.b = [o.b[0] + dx, o.b[1] + dy]; return o; }), sel.has(d.id));
     });
-    function wireColor(p) { return (sim && SL.potColor(sim.pot[key(p)])) || "#000"; }
-    var ends = {};
+    function ptColor(p) { return (sim && SL.potColor(sim.pot[key(p)])) || "#000"; }
+    function wireColor(w) {
+      if (!sim) return "#000";
+      var m = sim.wirePot && sim.wirePot[w.id] != null ? sim.wirePot[w.id] : sim.pot[key(w.a)];
+      return SL.potColor(m) || "#000";
+    }
     doc.wires.forEach(function (w) {
-      var col = sel.has(w.id) ? C.SEL : wireColor(w.a);
+      var col = sel.has(w.id) ? C.SEL : wireColor(w);
       r.wire(shifted(w, function (o) { o.a = [o.a[0] + dx, o.a[1] + dy]; o.b = [o.b[0] + dx, o.b[1] + dy]; return o; }), col);
-      ends[key(w.a)] = (ends[key(w.a)] || 0) + 1;
-      ends[key(w.b)] = (ends[key(w.b)] || 0) + 1;
     });
-    Object.keys(ends).forEach(function (k) {
-      var p = k.split(",").map(Number);
-      var tee = doc.wires.some(function (w) { return SL.wireInterior(w, p); });
-      if (ends[k] >= 3 || tee) r.dot(p, wireColor(p));
+    SL.junctionPoints(doc).forEach(function (p) {
+      r.dot(p, ptColor(p));
     });
     var drivers = sim ? sim.drivers(doc) : null;
     doc.comps.forEach(function (c) {
@@ -108,19 +113,12 @@
   function moveSelection(dx, dy) {
     var t = A.tab(), d = t.doc;
     A.checkpoint();
-    var moved = {};
-    d.comps.forEach(function (c) { if (A.sel.has(c.id)) SL.terminals(c).forEach(function (p) { moved[key(p)] = true; }); });
-    d.comps.forEach(function (c) { if (A.sel.has(c.id)) { c.x += dx; c.y += dy; } });
-    d.wires.forEach(function (w) {
-      if (A.sel.has(w.id)) { w.a = [w.a[0] + dx, w.a[1] + dy]; w.b = [w.b[0] + dx, w.b[1] + dy]; return; }
-      // wires attached to moved parts follow them
-      if (moved[key(w.a)]) w.a = [w.a[0] + dx, w.a[1] + dy];
-      if (moved[key(w.b)]) w.b = [w.b[0] + dx, w.b[1] + dy];
-    });
-    d.texts.forEach(function (x) { if (A.sel.has(x.id)) { x.x += dx; x.y += dy; } });
-    d.drawings.forEach(function (x) { if (A.sel.has(x.id)) { x.a = [x.a[0] + dx, x.a[1] + dy]; x.b = [x.b[0] + dx, x.b[1] + dy]; } });
-    d.wires = d.wires.filter(function (w) { return w.a[0] !== w.b[0] || w.a[1] !== w.b[1]; });
+    var res = SL.moveItems(d, A.sel, dx, dy);
     A.changed();
+    if (res && res.disconnected) {
+      var suffix = res.names && res.names.length ? " (" + res.names.join(", ") + ")" : "";
+      A.message("No s'ha pogut refer la connexió i s'ha desconnectat l'element" + suffix + ".");
+    }
   }
 
   function onDown(e) {
@@ -169,6 +167,19 @@
     cv.setPointerCapture(e.pointerId);
     var T = A.tool;
     if (T.t === "place") { A.place(T.kind, sw[0], sw[1]); return; }
+    if (T.t === "junction") {
+      A.checkpoint();
+      var jr = SL.toggleJunction(t.doc, w);
+      if (!jr.changed) {
+        t.undo.pop();
+        A.setStatus("Punt de connexió: feu clic sobre l'encreuament de dos conductors");
+      } else {
+        A.setStatus(jr.connected ? "S'ha creat la connexió entre els conductors" : "S'ha desfet la connexió entre els conductors");
+        A.changed();
+      }
+      A.redraw();
+      return;
+    }
     if (T.t === "wire") {
       if (!A.wireFrom) A.wireFrom = sw;
       else if (A.wireFrom[0] === sw[0] && A.wireFrom[1] === sw[1]) A.wireFrom = null;
@@ -302,11 +313,16 @@
         g.strokeStyle = "rgb(0,0,200)"; g.lineWidth = 1; g.setLineDash([]);
         g.beginPath(); g.arc(s[0], s[1], 4, 0, 2 * Math.PI); g.stroke();
         if (A.wireFrom) {
-          var a = A.wireFrom, mid = a[0] === sw[0] || a[1] === sw[1] ? a : [sw[0], a[1]];
+          var a = A.wireFrom, mid = SL.chooseRouteMid(t.doc, a, sw);
           var p0 = r.s(a), p1 = r.s(mid), p2 = r.s(sw);
           g.setLineDash([5, 3]); g.lineWidth = 1.5;
           g.beginPath(); g.moveTo(p0[0], p0[1]); g.lineTo(p1[0], p1[1]); g.lineTo(p2[0], p2[1]); g.stroke(); g.setLineDash([]);
         }
+      } else if (A.tool.t === "junction") {
+        var sj = r.s(sw);
+        g.fillStyle = "rgba(0,90,255,0.65)";
+        g.strokeStyle = "rgb(0,0,200)"; g.lineWidth = 1; g.setLineDash([]);
+        g.beginPath(); g.arc(sj[0], sj[1], Math.max(3, 3.2 * t.view.zoom), 0, 2 * Math.PI); g.fill(); g.stroke();
       }
     }
     if (dr && dr.t === "rubber") {
