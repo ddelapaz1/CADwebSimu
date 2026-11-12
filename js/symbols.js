@@ -187,6 +187,7 @@
             s.l([x - 4, 45], [x + 4, 45]);
           } else {
             s.r([x - 5, 15], [x + 5, 45]);
+            if (v.blown) { s.l([x - 9, 22], [x + 9, 38]); s.l([x - 9, 38], [x + 9, 22]); }
           }
           s.term(x, 0, isNeutral ? "N" : String(2 * i + 1));
           s.term(x, 60, isNeutral ? "N" : String(2 * i + 2));
@@ -690,8 +691,11 @@
         if (kind === "Counter") {
           s.r([-24, 20], [-12, 40], "rgb(255,255,255)");
           s.r([-20, 26], [-16, 34]);
+          // reset input R (energised between R and A2 the count goes back to 0)
+          s.l([-30, 0], [-30, 30]); s.l([-30, 30], [-24, 30]);
         }
         s.term(0, 0, "A1"); s.term(0, 60, "A2");
+        if (kind === "Counter") s.term(-30, 0, "R");
         break;
       case "Lamp": case "LampFlash":
         s.l([0, 0], [0, 18]); s.l([0, 42], [0, 60]);

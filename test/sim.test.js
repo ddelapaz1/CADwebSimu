@@ -278,5 +278,134 @@ test("all registered symbols in SL.KIND_LIST build valid geometry", () => {
   });
 });
 
+// ---------------------------------------------------------------- protections and new elements
+const W = (d, a, b) => SL.addWire(d, a, b);
+const tickN = (s, d, n, dt) => { let f = null; for (let i = 0; i < n && !f; i++) f = s.tick(d, dt); return f; };
+
+test("short circuit blows the nearest fuse; the rest stays energised; fuse can be replaced", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedLN", 300, 120, 0, "");               // L (300,150)  N (330,150)
+  const f1 = SL.makeComp(d, "Fuse1", 300, 150, 0, "-F1");  // (300,150)-(300,210)
+  const f2 = SL.makeComp(d, "Fuse1", 300, 210, 0, "-F2");  // (300,210)-(300,270)
+  const sw = SL.makeComp(d, "Switch1", 300, 270, 0, "-Q1"); // (300,270)-(300,330)
+  const h = SL.makeComp(d, "Lamp", 420, 210, 0, "-H1");    // (420,210)-(420,270)
+  W(d, [300, 210], [420, 210]);
+  W(d, [330, 150], [330, 400]);
+  W(d, [420, 270], [420, 400]);
+  W(d, [330, 400], [420, 400]);
+  W(d, [300, 330], [330, 330]);
+  const s = new SL.Sim(d);
+  eq(s.tick(d, 0.1), null);
+  eq(s.st[h.id].energized, true, "lamp on");
+  s.setActuator(d, sw.id, true);
+  eq(s.tick(d, 0.1), null, "no fault: a fuse blows instead");
+  eq([!!s.st[f1.id].blown, !!s.st[f2.id].blown], [false, true], "only -F2 (closest) blows");
+  eq(s.st[h.id].energized, true, "lamp branch still fed");
+  eq(s.events.length, 1, "event reported");
+  s.replaceFuse(d, f2.id); eq(s.tick(d, 0.1), null);
+  eq(!!s.st[f2.id].blown, true, "blows again while the short remains");
+  s.setActuator(d, sw.id, false); s.replaceFuse(d, f2.id); eq(s.tick(d, 0.1), null);
+  eq(!!s.st[f2.id].blown, false, "replaced fuse holds");
+});
+
+test("earth fault trips the RCD (preferred to the MCB); L-N short is not an RCD trip", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedLNPE", 300, 120, 0, "");                                   // L 300, N 330, PE 360 (y 150)
+  const rcd = SL.makeComp(d, "Rcd1N", 300, 150, 0, "-Q1", { closed: true });     // L 300,150-210  N 330,150-210
+  const h = SL.makeComp(d, "Lamp", 300, 210, 0, "-H1");                          // (300,210)-(300,270)
+  W(d, [330, 210], [330, 270]); W(d, [300, 270], [330, 270]);
+  const flt = SL.makeComp(d, "Switch1", 270, 210, 0, "-S9");                      // (270,210)-(270,270)
+  const q2 = SL.makeComp(d, "Auto1", 270, 270, 0, "-Q2", { closed: true });       // (270,270)-(270,330)
+  W(d, [300, 210], [270, 210]); W(d, [270, 330], [360, 330]); W(d, [360, 150], [360, 330]);
+  const s = new SL.Sim(d);
+  eq(s.tick(d, 0.1), null); eq(s.st[h.id].energized, true);
+  s.setActuator(d, flt.id, true);
+  eq(s.tick(d, 0.1), null, "RCD trips instead of a fault");
+  eq([s.st[rcd.id].act, s.st[q2.id].act, !!s.st[rcd.id].tripped], [false, true, true]);
+  eq(s.st[h.id].energized, false, "everything after the RCD is off");
+
+  const d2 = SL.newDoc();
+  SL.makeComp(d2, "FeedLN", 300, 120, 0, "");
+  SL.makeComp(d2, "Rcd1N", 300, 150, 0, "-Q1", { closed: true });
+  W(d2, [300, 210], [330, 210]);
+  eq(new SL.Sim(d2).tick(d2, 0.1), "Short", "L-N short behind an RCD only: fault");
+});
+
+test("diode conducts anode to cathode only", () => {
+  const build = (rot) => {
+    const d = SL.newDoc();
+    SL.makeComp(d, "FeedPosNeg", 300, 120, 0, "");      // + (300,150)  - (330,150)
+    if (rot) SL.makeComp(d, "Diode", 300, 210, 2, "-V1"); // reversed: cathode at (300,150)
+    else SL.makeComp(d, "Diode", 300, 150, 0, "-V1");
+    const h = SL.makeComp(d, "Lamp", 300, 210, 0, "-H1");
+    W(d, [300, 270], [330, 270]); W(d, [330, 150], [330, 270]);
+    const s = new SL.Sim(d); eq(s.tick(d, 0.1), null);
+    return s.st[h.id].energized;
+  };
+  eq(build(false), true, "forward");
+  eq(build(true), false, "reverse blocks");
+});
+
+test("pulse counter counts to its preset and resets through R", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedLN", 300, 120, 0, "");
+  const s1 = SL.makeComp(d, "Switch1", 300, 150, 0, "-S1");
+  const kc = SL.makeComp(d, "Counter", 300, 210, 0, "-KC1", { count_preset: 3 }); // R at (270,210)
+  const s2 = SL.makeComp(d, "Switch1", 270, 150, 0, "-S2");
+  W(d, [270, 150], [300, 150]); W(d, [300, 270], [330, 270]); W(d, [330, 150], [330, 270]);
+  const s = new SL.Sim(d); eq(s.tick(d, 0.1), null);
+  const pulse = () => { s.setActuator(d, s1.id, true); s.tick(d, 0.1); s.setActuator(d, s1.id, false); s.tick(d, 0.1); };
+  pulse(); pulse(); eq([s.st[kc.id].count, s.st[kc.id].on], [2, false]);
+  pulse(); eq([s.st[kc.id].count, s.st[kc.id].on], [3, true], "reaches preset");
+  s.setActuator(d, s2.id, true); s.tick(d, 0.1);
+  eq([s.st[kc.id].count, s.st[kc.id].on], [0, false], "reset");
+});
+
+test("time switch repeats its ON/OFF program", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedLN", 300, 120, 0, "");
+  const ts = SL.makeComp(d, "TimeSwitch", 300, 150, 0, "-KT1", { time_base: 2, off_base: 1, time_mult: 1 });
+  W(d, [300, 210], [330, 210]); W(d, [330, 150], [330, 210]);
+  const s = new SL.Sim(d); eq(s.tick(d, 0), null);
+  eq(s.st[ts.id].on, true, "starts ON");
+  tickN(s, d, 25, 0.1); eq(s.st[ts.id].on, false, "OFF after 2 s");
+  tickN(s, d, 10, 0.1); eq(s.st[ts.id].on, true, "ON again after 3 s");
+});
+
+test("mechanical interlock keeps two contactors from closing together", () => {
+  const build = (withInterlock) => {
+    const d = SL.newDoc();
+    SL.makeComp(d, "Contactor3", 150, 300, 0, "-KM1");
+    SL.makeComp(d, "Contactor3", 300, 300, 0, "-KM2");
+    if (withInterlock) SL.makeComp(d, "Interlock", 240, 300, 0, "");
+    const coils = [600, 750].map((x, i) => {
+      SL.makeComp(d, "FeedLN", x, 120, 0, "");
+      const c = SL.makeComp(d, "Coil", x, 150, 0, "-KM" + (i + 1));
+      W(d, [x, 210], [x + 30, 210]); W(d, [x + 30, 150], [x + 30, 210]);
+      return c;
+    });
+    const s = new SL.Sim(d); eq(s.tick(d, 0.1), null);
+    return coils.map((c) => s.st[c.id].on);
+  };
+  eq(build(false), [true, true]);
+  eq(build(true), [true, false], "second contactor blocked");
+});
+
+test("overload relay trips when the motor runs on two phases", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedL123", 150, 120, 0, "");                          // (150|180|210, 150)
+  W(d, [150, 150], [150, 210]); W(d, [180, 150], [180, 210]);
+  const q = SL.makeComp(d, "Switch1", 210, 150, 0, "-Q1", { closed: true });
+  const f = SL.makeComp(d, "ThermalRelay3", 150, 210, 0, "-F1");
+  const m = SL.makeComp(d, "Motor3", 150, 270, 0, "-M1");
+  const s = new SL.Sim(d); eq(s.tick(d, 0.1), null);
+  eq(s.st[m.id].motor, 1, "runs on three phases");
+  s.setActuator(d, q.id, false); eq(s.tick(d, 0.1), null);
+  eq([s.st[m.id].motor, s.st[m.id].twoPhase], [0, true], "two phases: hums");
+  tickN(s, d, 15, 0.1); eq(s.st[f.id].act, false, "not yet");
+  tickN(s, d, 20, 0.1); eq(s.st[f.id].act, true, "thermal tripped");
+  eq(s.events.some((e) => /tèrmic/.test(e)), true);
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");

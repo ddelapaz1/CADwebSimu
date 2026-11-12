@@ -40,6 +40,8 @@
         var st = sim.s(c.id);
         vis.closed = sim.closed(c, drivers);
         vis.pos = st.pos || 0;
+        if (st.blown) { vis.blown = true; extra = "fos"; }
+        else if (st.tripped && !st.act) extra = "disparat";
         if (K.role === "Load") {
           vis.active = st.energized || st.on;
           if ((c.kind === "Lamp" || c.kind === "LampFlash") && (c.kind === "Lamp" ? st.energized : st.on)) {
@@ -47,11 +49,22 @@
           }
           if (["Bell", "Buzzer", "Siren", "Horn"].indexOf(c.kind) >= 0) vis.active = st.energized;
           vis.motor = st.motor; vis.conn = st.conn; vis.angle = st.angle;
-          if (K.timer && (st.energized || st.on) && !(c.kind === "TimerOnOff" && st.energized === st.on)) {
+          if (c.kind === "Counter") {
+            extra = (st.count || 0) + " / " + Math.max(1, c.count_preset | 0 || 3);
+          } else if (c.kind === "TimeSwitch") {
+            if (st.energized) {
+              var tOn = SL.presetSecs(c), per = tOn + SL.offSecs(c), ph = per > 0 ? st.t % per : 0;
+              extra = st.phaseOn !== false ? "ON " + Math.max(0, tOn - ph).toFixed(1) + " s" : "OFF " + Math.max(0, per - ph).toFixed(1) + " s";
+            }
+          } else if (c.kind === "Motor3" && st.twoPhase) {
+            extra = "2 fases!";
+          } else if (K.timer && (st.energized || st.on) && !(c.kind === "TimerOnOff" && st.energized === st.on)) {
             var rem = c.kind === "TimerOn" && st.on ? 0 : Math.max(0, SL.presetSecs(c) - st.t);
             extra = rem.toFixed(1) + " s";
           }
           color = vis.active || st.motor ? C.RED : C.GRAY;
+        } else if (K.role === "Converter") {
+          color = st.on ? C.RED : C.GRAY;
         } else if (K.role === "Feed") {
           color = SL.potColor(K.feed[0][0]) || "#000";
         } else if (K.role === "Passive") {
@@ -109,7 +122,9 @@
     var d = A.tab().doc;
     for (var i = d.comps.length - 1; i >= 0; i--) {
       var c = d.comps[i];
-      if (SL.clickKind(c.kind) && inRect(SL.compRect(c), w, 3)) return c;
+      var ck = SL.clickKind(c.kind);
+      if (ck === "fuse" && !(A.tab().sim && A.tab().sim.s(c.id).blown)) continue;
+      if (ck && inRect(SL.compRect(c), w, 3)) return c;
     }
     return null;
   }
@@ -151,7 +166,8 @@
       if (e.button !== 0) return;
       var c = clickable(w);
       if (!c) return;
-      if (SL.clickKind(c.kind) === "momentary") { t.sim.setActuator(t.doc, c.id, true); A.pressed = c.id; cv.setPointerCapture(e.pointerId); }
+      if (SL.clickKind(c.kind) === "fuse") t.sim.replaceFuse(t.doc, c.id);
+      else if (SL.clickKind(c.kind) === "momentary") { t.sim.setActuator(t.doc, c.id, true); A.pressed = c.id; cv.setPointerCapture(e.pointerId); }
       else {
         var nv = !t.sim.s(c.id).act;
         t.sim.setActuator(t.doc, c.id, nv);
@@ -163,7 +179,7 @@
           t.dirty = true; A.changed();
         }
       }
-      if (t.mode === "sim") { var f = t.sim.tick(t.doc, 0); if (f) A.fault(t, f); }
+      if (t.mode === "sim") { var f = t.sim.tick(t.doc, 0); if (f) A.fault(t, f); A.simEvents(t); }
       A.redraw();
       return;
     }
@@ -245,7 +261,7 @@
     if (A.pressed != null) {
       t.sim && t.sim.setActuator(t.doc, A.pressed, false);
       A.pressed = null;
-      if (t.mode === "sim") { var f = t.sim.tick(t.doc, 0); if (f) A.fault(t, f); }
+      if (t.mode === "sim") { var f = t.sim.tick(t.doc, 0); if (f) A.fault(t, f); A.simEvents(t); }
     }
     var dr = A.drag;
     A.drag = null;

@@ -42,7 +42,7 @@ SL.CATS = [
     ["Ground", "Feeds", "Protecció (terra)", "Feed"],
     ["Transformer1", "Feeds", "Transformador", "Converter", 0, false, "-T"],
     ["Transformer3", "Feeds", "Transformador III", "Converter", 0, false, "-T"],
-    ["Diode", "Feeds", "Díode", "Passive", 1, false, "-V"],
+    ["Diode", "Feeds", "Díode", "Converter", 0, false, "-V"],
     ["Rectifier", "Feeds", "Rectificador", "Converter", 0, false, "-G"],
     ["PowerSupply1", "Feeds", "Font d'alimentació", "Converter", 0, false, "-G"],
     ["PowerSupply3", "Feeds", "Font d'alimentació III", "Converter", 0, false, "-G"],
@@ -265,6 +265,8 @@ SL.normalizeDoc = function (d) {
       time_mult: c.time_mult == null ? 1 : +c.time_mult,
       color: c.color || "Verde",
       closed: !!c.closed, // breaker position, kept with the schematic
+      count_preset: c.count_preset == null ? 3 : Math.max(1, +c.count_preset | 0), // pulse counter
+      off_base: c.off_base == null ? 5 : +c.off_base, // time switch: OFF time (same multiplier)
     };
   });
   n.wires = (d.wires || []).map(function (w) { return { id: w.id, a: [w.a[0], w.a[1]], b: [w.b[0], w.b[1]] }; });
@@ -289,6 +291,11 @@ SL.TICK_SECS = 0.1;
 SL.ticksPerUnit = function (mult) { return mult < 0.5 ? 1 : mult < 5 ? 10 : mult < 30 ? 100 : 1000; };
 SL.presetTicks = function (c) { return Math.trunc(Math.max(0, c.time_base)) * SL.ticksPerUnit(c.time_mult); };
 SL.presetSecs = function (c) { return SL.presetTicks(c) * SL.TICK_SECS; };
+/** Time switch OFF time: off_base with the same multiplier as the ON time. */
+SL.offSecs = function (c) {
+  var b = c.off_base == null ? 5 : c.off_base;
+  return Math.trunc(Math.max(0, b)) * SL.ticksPerUnit(c.time_mult) * SL.TICK_SECS;
+};
 
 SL.snap = function (v) { return Math.round(v / SL.GRID) * SL.GRID; };
 
@@ -1124,6 +1131,7 @@ SL.makeComp = function (doc, kind, x, y, rot, name, extra) {
   var c = {
     id: SL.newId(doc), kind: kind, x: x, y: y, rot: rot || 0, mirror: false,
     name: name || "", func: "", time_base: 5, time_mult: 1, color: "Verde", closed: false,
+    count_preset: 3, off_base: 5,
   };
   if (extra) Object.assign(c, extra);
   doc.comps.push(c);

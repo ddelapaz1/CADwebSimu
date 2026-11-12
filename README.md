@@ -13,6 +13,11 @@ Editor i simulador d'esquemes elèctrics de comandament i potència que funciona
 - Simular: premeu els polsadors i interruptors; els contactors s'exciten, els motors giren,
   els pilots s'encenen i els cables prenen el color de la seva línia. Detecta curtcircuits,
   derivacions a terra i connexions de massa alimentades.
+- Proteccions: davant un curtcircuit es fon el fusible o dispara l'automàtic més proper a la
+  falta (selectivitat); una derivació a terra fa disparar el diferencial. Els fusibles fosos es
+  canvien fent-hi clic. El relé tèrmic dispara si el motor treballa amb només dues fases.
+- Comptador de polsos amb preselecció i entrada de posada a zero (R), interruptor horari amb
+  programa ON/OFF cíclic, díode amb sentit de conducció i enclavament mecànic entre contactors.
 - Diversos esquemes oberts alhora, desfer/refer, copiar/enganxar, caixetí, formats A4/A3,
   exportar a PNG i imprimir.
 - Els esquemes es desen com a fitxers `.ecs`, compatibles amb la versió per a macOS, i la

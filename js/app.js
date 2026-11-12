@@ -352,6 +352,7 @@
     });
     A.lastT = null;
     setStatus("Simulació: feu clic sobre polsadors, interruptors i automàtics per accionar-los");
+    (all ? A.tabs : [A.tab()]).forEach(A.simEvents);
     faults.forEach(function (x) { A.fault(x[0], x[1]); });
     refreshAll();
   };
@@ -374,6 +375,13 @@
     var f = t.sim.tick(t.doc, STEP_SECS);
     if (f) A.fault(t, f);
     refreshAll();
+    A.simEvents(t);
+  };
+  /** Show trips, blown fuses and similar simulation events in the status bar. */
+  A.simEvents = function (t) {
+    if (!t || !t.sim || !t.sim.events.length) return;
+    setStatus(t.sim.events.join(" · "));
+    t.sim.events = [];
   };
   /** As in the original: message, stop, back to editing. */
   A.fault = function (t, f) {
@@ -391,6 +399,7 @@
       any = true;
       var f = t.sim.tick(t.doc, dt);
       if (f) A.fault(t, f);
+      if (t === A.tab()) A.simEvents(t);
     });
     if (!any) A.lastT = null;
     return any;
@@ -470,11 +479,21 @@
       return;
     }
     var K = SL.KINDS[c.kind], name = textInput(c.name), func = textInput(c.func), body = [el("b", { text: K.label }), row("Nom:", name), row("Funció:", func)];
-    var base, mult, color;
+    var base, mult, color, offBase, preset;
     if (K.timer) {
       base = el("input", { type: "number", step: "1", min: "0", style: "width:80px" }); base.value = c.time_base;
       mult = radios("mult", [[0.1, "x 0,1 Seg"], [1, "x 1 Seg"], [10, "x 10 Seg"], [60, "x 60 Seg"]], c.time_mult);
-      body.push(el("div", {}, [el("div", { text: "Temporització" }), el("div", { class: "radios" }, [base, mult])]));
+      body.push(el("div", {}, [el("div", { text: c.kind === "TimeSwitch" ? "Temps connectat (ON)" : "Temporització" }), el("div", { class: "radios" }, [base, mult])]));
+    }
+    if (c.kind === "TimeSwitch") {
+      offBase = el("input", { type: "number", step: "1", min: "0", style: "width:80px" }); offBase.value = c.off_base == null ? 5 : c.off_base;
+      body.push(row("Temps desconnectat (OFF):", offBase));
+      body.push(el("div", { class: "hint", text: "Amb tensió a A1-A2 repeteix el programa: ON i després OFF (mateix multiplicador)." }));
+    }
+    if (c.kind === "Counter") {
+      preset = el("input", { type: "number", step: "1", min: "1", style: "width:80px" }); preset.value = c.count_preset || 3;
+      body.push(row("Preselecció (polsos):", preset));
+      body.push(el("div", { class: "hint", text: "Compta els polsos a A1-A2; en arribar a la preselecció actua els seus contactes. Tensió entre R i A2 el posa a zero." }));
     }
     if (c.kind === "Lamp" || c.kind === "LampFlash" || c.kind === "PushBtn") {
       color = radios("color", SL.LAMP_COLOR_OPTIONS || Object.keys(SL.LAMP_COLORS).map(function (k) { return [k, k]; }), c.color);
@@ -482,12 +501,14 @@
     }
     if (K.role === "Contact" || K.role === "Poles") body.push(el("div", { class: "hint", text: "Els contactes segueixen la bobina, temporitzador o relé tèrmic amb el mateix nom." }));
     if (K.role === "Actuator") body.push(el("div", { class: "hint", text: "Tots els accionaments amb el mateix nom es mouen alhora." }));
-    var title = K.timer ? "Temporitzadors" : (c.kind === "Lamp" || c.kind === "LampFlash" || c.kind === "PushBtn") ? "Indicador color" : "Edita";
+    var title = c.kind === "TimeSwitch" ? "Interruptor horari" : c.kind === "Counter" ? "Comptador" : K.timer ? "Temporitzadors" : (c.kind === "Lamp" || c.kind === "LampFlash" || c.kind === "PushBtn") ? "Indicador color" : "Edita";
     dialog(title, body, [["D'acord", function () {
       A.checkpoint();
       c.name = name.value.trim(); c.func = func.value;
       if (base) { var b = parseFloat(String(base.value).replace(",", ".")); c.time_base = isFinite(b) && b >= 0 ? b : 5; c.time_mult = parseFloat(mult.value()) || 1; }
       if (color) c.color = color.value() || "Verde";
+      if (offBase) { var ob = parseFloat(String(offBase.value).replace(",", ".")); c.off_base = isFinite(ob) && ob >= 0 ? ob : 5; }
+      if (preset) { var pv = parseInt(preset.value, 10); c.count_preset = pv >= 1 ? pv : 3; }
       A.changed();
     }], ["Cancel·la", null]]);
   };

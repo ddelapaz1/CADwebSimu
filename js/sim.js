@@ -59,6 +59,44 @@
 
   function key(p) { return p[0] + "," + p[1]; }
 
+  // Protective devices. Fuses are "Passive" (always closed until they blow);
+  // fuse switches, MCBs, breakers and RCDs are "Manual" (they open on a trip).
+  function isFuse(kind) { return /^Fuse\d/.test(kind); }
+  function isOvercurrent(kind) { return isFuse(kind) || /^(FuseSw|Auto|Breaker)\d/.test(kind); }
+  function isRcd(kind) { return /^Rcd/.test(kind); }
+  SL.isFuse = isFuse;
+  SL.TRIP_TIME_THERMAL = 3; // s a motor may run on two phases before the overload relay trips
+
+  /**
+   * Mechanical interlocks: each "Interlock" symbol links the two contactors
+   * (Poles) placed closest to it on either side along its dashed line.
+   * Returns { name: [partner names] }.
+   */
+  function interlockPairs(doc) {
+    var pairs = {};
+    doc.comps.forEach(function (il) {
+      if (il.kind !== "Interlock") return;
+      var o = SL.xform([0, 30], il.rot, il.mirror), o1 = SL.xform([1, 30], il.rot, il.mirror);
+      var cx = o[0] + il.x, cy = o[1] + il.y, ax = o1[0] - o[0], ay = o1[1] - o[1];
+      var best = [null, null];
+      doc.comps.forEach(function (c) {
+        if (!c.name || SL.KINDS[c.kind].role !== "Poles") return;
+        var r = SL.compRect(c), vx = (r.x0 + r.x1) / 2 - cx, vy = (r.y0 + r.y1) / 2 - cy;
+        var along = vx * ax + vy * ay, perp = Math.abs(vx * ay - vy * ax);
+        if (perp > 60 || Math.abs(along) > 180 || along === 0) return;
+        var side = along < 0 ? 0 : 1;
+        if (!best[side] || Math.abs(along) < best[side].d) best[side] = { d: Math.abs(along), name: c.name };
+      });
+      if (best[0] && best[1] && best[0].name !== best[1].name) {
+        var a = best[0].name, b = best[1].name;
+        (pairs[a] = pairs[a] || []).push(b);
+        (pairs[b] = pairs[b] || []).push(a);
+      }
+    });
+    return pairs;
+  }
+  SL.interlockPairs = interlockPairs;
+
   /** Fixed connectivity: wires, T-junctions, explicit crossing junctions, and terminal positions. */
   function buildTopo(doc) {
     var idx = {}, hIdx = {}, vIdx = {}, pts = [], coordList = [], coordSeen = {};
@@ -152,6 +190,8 @@
     this.wirePot = {};
     this.fault = null;
     this.time = 0;
+    this.events = [];    // messages for the status bar (trips, blown fuses)
+    this.forceOpen = {}; // ids treated as open while looking for the device that clears a fault
     var self = this;
     doc.comps.forEach(function (c) {
       // breakers and switches start closed (estimated)
@@ -181,8 +221,9 @@
 
   Sim.prototype.closed = function (c, drivers) {
     var st = this.s(c.id), K = SL.KINDS[c.kind];
+    if (this.forceOpen[c.id]) return false;
     switch (K.role) {
-      case "Passive": return true;
+      case "Passive": return !st.blown;
       case "Manual": return st.act;
       case "Poles": return !!drivers[c.name];
       case "Contact": return !!drivers[c.name] !== K.nc;
@@ -257,7 +298,7 @@
       var t = topo.terms[c.id];
       K.feed.forEach(function (f, i) { if (i < t.length) mask[d.find(t[i])] |= f[0]; });
     });
-    for (var pass = 0; pass < 4; pass++) {
+    for (var pass = 0; pass < 8; pass++) {
       var convAdded = false;
       doc.comps.forEach(function (c) {
         if (SL.KINDS[c.kind].role !== "Converter") return;
@@ -282,6 +323,17 @@
           var okPs1 = validPair(p0, p1);
           st.energized = st.on = okPs1;
           if (okPs1) { addPot(2, P.POS); addPot(3, P.NEG); }
+        } else if (c.kind === "Diode") {
+          // Conducts from anode (1) to cathode (2): "+" passes forwards, "-" passes
+          // backwards; an AC potential passes (half wave) in its conducting sense.
+          var ma = t[0] != null ? single(mask[d.find(t[0])]) : 0, mk = t[1] != null ? single(mask[d.find(t[1])]) : 0;
+          var ac = function (p) { return p && p !== P.POS && p !== P.NEG && p !== P.PE; };
+          var cond = false;
+          if (ma === P.POS) { addPot(1, P.POS); cond = true; }
+          if (mk === P.NEG) { addPot(0, P.NEG); cond = true; }
+          if (ac(ma)) { addPot(1, ma); cond = true; }
+          if (ac(mk) && !ma) { addPot(0, mk); cond = true; }
+          st.energized = st.on = cond;
         } else if (c.kind === "PowerSupply3") {
           var okPs3 = orderDir(p0, p1, p2) !== 0;
           st.energized = st.on = okPs3;
@@ -340,6 +392,13 @@
       } else if (c.kind === "Flasher" || c.kind === "PulseGen") {
         if (st.energized) { st.t += dt; if (st.t >= Math.max(preset, 0.05)) { st.t = 0; st.on = !st.on; } }
         else { st.t = 0; st.on = false; }
+      } else if (c.kind === "TimeSwitch") {
+        // Cyclic program: ON for the preset time, then OFF for off_base, repeating
+        if (st.energized) {
+          st.t += dt;
+          var tOn = preset, per = tOn + SL.offSecs(c);
+          st.phaseOn = per <= 0 || (st.t % per) < tOn;
+        } else { st.t = 0; st.phaseOn = true; }
       } else if (c.kind === "LampFlash") {
         if (st.energized) { st.t += dt; if (st.t >= 0.4) { st.t = 0; st.on = !st.on; } }
         else { st.t = 0; st.on = false; }
@@ -349,9 +408,14 @@
         st.angle += dt * speed * st.motor;
       }
     });
-    var toggled = {};
+    var toggled = {}, counted = {}, ilk = interlockPairs(doc), r = null;
+    var coilOn = function (name) {
+      return doc.comps.some(function (o) { return o.kind === "Coil" && o.name === name && self.s(o.id).on; });
+    };
     for (var it = 0; it < MAX_SETTLE; it++) {
-      var r = this.solve(doc, topo);
+      r = this.solve(doc, topo);
+      // A protective device in the faulty path trips instead of stopping the simulation
+      for (var trips = 0; r.fault && trips < 8 && this.trip(doc, topo, r.fault); trips++) r = this.solve(doc, topo);
       if (r.fault) { this.fault = r.fault; return r.fault; }
       var changed = false;
       doc.comps.forEach(function (c) {
@@ -362,6 +426,9 @@
         if (c.kind === "Motor3") {
           var dir = orderDir(pots[0], pots[1], pots[2]);
           st.energized = dir !== 0; st.motor = dir;
+          // Two phases and the third dead: the motor hums without starting (single-phasing)
+          var ph = pots.slice(0, 3).filter(isPhase);
+          st.twoPhase = dir === 0 && ph.length === 2 && ph[0] !== ph[1] && pots.slice(0, 3).filter(function (p) { return !p; }).length === 1;
         } else if (c.kind === "Motor3YD") {
           var res = SL.ydMotor(pots, t.map(function (j) { return r.roots[j]; }));
           st.energized = res[0] !== 0; st.motor = res[0]; st.conn = res[1];
@@ -391,7 +458,20 @@
           st.energized = e;
           var on = st.on;
           switch (c.kind) {
-            case "Coil": case "Solenoid": case "TimeSwitch": on = e; break;
+            case "Coil":
+              // a mechanical interlock stops it pulling in while its partner is closed
+              on = e && (st.on || !(ilk[c.name] || []).some(coilOn));
+              break;
+            case "Solenoid": on = e; break;
+            case "TimeSwitch": on = e && st.phaseOn !== false; break;
+            case "Counter": {
+              var pre = Math.max(1, c.count_preset | 0 || 3);
+              var reset = pots.length >= 3 && validPair(pots[2], pots[1]);
+              if (e && !st.prev && !counted[c.id]) { counted[c.id] = true; st.count = (st.count || 0) + 1; }
+              if (reset) st.count = 0;
+              on = (st.count || 0) >= pre;
+              break;
+            }
             case "TimerOn": on = e && st.on; break;
             case "TimerOff": on = e || st.on; break;
             case "TimerOnOff": on = st.on; break;
@@ -407,7 +487,80 @@
       if (!changed) break;
     }
     doc.comps.forEach(function (c) { var st = self.s(c.id); st.prev = st.energized; });
+    this.thermalOverload(doc, topo, r, dt);
     return null;
+  };
+
+  /** Overload relays carrying a single-phasing motor trip after TRIP_TIME_THERMAL. */
+  Sim.prototype.thermalOverload = function (doc, topo, r, dt) {
+    if (!r) return;
+    var self = this, hum = {};
+    doc.comps.forEach(function (c) {
+      if (c.kind === "Motor3" && self.s(c.id).twoPhase) topo.terms[c.id].forEach(function (j) { hum[r.roots[j]] = true; });
+    });
+    doc.comps.forEach(function (c) {
+      if (c.kind !== "ThermalRelay3") return;
+      var st = self.s(c.id);
+      if (st.act) { st.ot = 0; return; }
+      var loaded = topo.terms[c.id].some(function (j) { return hum[r.roots[j]]; });
+      if (!loaded) { st.ot = 0; return; }
+      st.ot = (st.ot || 0) + dt;
+      if (st.ot >= SL.TRIP_TIME_THERMAL) {
+        self.setActuator(doc, c.id, true);
+        st.ot = 0;
+        self.events.push((c.name || "Relé tèrmic") + ": ha disparat el relé tèrmic (motor funcionant amb dues fases)");
+      }
+    });
+  };
+
+  /**
+   * Find the protective device whose opening clears `fault` and trip it.
+   * Short circuits trip fuses and breakers; earth faults trip an RCD first.
+   * Among several, the most selective one trips (the one that leaves the most
+   * of the circuit energized, i.e. the one closest to the fault).
+   */
+  Sim.prototype.trip = function (doc, topo, fault) {
+    var self = this, drivers = this.drivers(doc), best = null;
+    doc.comps.forEach(function (c) {
+      var rcd = isRcd(c.kind);
+      if (!isOvercurrent(c.kind) && !(rcd && fault !== "Short")) return;
+      if (!self.closed(c, drivers)) return;
+      self.forceOpen[c.id] = true;
+      var r = self.solve(doc, topo);
+      delete self.forceOpen[c.id];
+      if (r.fault) return;
+      // selectivity: keep the most loads fed, then the most nodes with a phase or "+"
+      var live = 0, fed = 0, LIVE = P.L1 | P.L2 | P.L3 | P.POS;
+      r.out.forEach(function (m) { if (m & LIVE) live++; });
+      doc.comps.forEach(function (o) {
+        var t = topo.terms[o.id];
+        if (SL.KINDS[o.kind].role === "Load" && t.length >= 2 && validPair(single(r.out[t[0]]), single(r.out[t[1]]))) fed++;
+      });
+      var score = (rcd ? 1e9 : 0) + fed * 1e5 + live;
+      if (!best || score > best.score) best = { c: c, score: score };
+    });
+    if (!best) return false;
+    var c = best.c, st = this.s(c.id), why = fault === "Short" ? "curtcircuit" : "derivació a terra";
+    if (isFuse(c.kind)) {
+      st.blown = true;
+      this.events.push((c.name || "Fusible") + ": s'ha fos el fusible (" + why + "). Feu-hi clic per canviar-lo.");
+    } else {
+      this.setActuator(doc, c.id, false);
+      doc.comps.forEach(function (o) { if (o.id === c.id || (c.name && o.name === c.name && o.kind === c.kind)) self.s(o.id).tripped = true; });
+      this.events.push((c.name || SL.KINDS[c.kind].label) + ": ha disparat " +
+        (isRcd(c.kind) ? "el diferencial" : "la protecció") + " (" + why + ")");
+    }
+    return true;
+  };
+
+  /** Replace a blown fuse (click during simulation). */
+  Sim.prototype.replaceFuse = function (doc, id) {
+    var st = this.s(id);
+    if (!st.blown) return false;
+    st.blown = false;
+    var c = doc.comps.find(function (x) { return x.id === id; });
+    this.events.push((c && c.name || "Fusible") + ": fusible canviat");
+    return true;
   };
 
   /** Press/release an actuator; every one with the same name moves too. */
@@ -420,6 +573,7 @@
       if (o.id === id || (c.name && o.name === c.name && SL.KINDS[o.kind].role === role)) {
         var st = self.s(o.id);
         st.act = value;
+        if (value) st.tripped = false;
         if (o.kind === "Sel102" || o.kind === "Sel123") st.pos = nextPos;
       }
     });
@@ -441,6 +595,7 @@
       "Breaker3", "Breaker3N", "PermOvervolt1N", "PermOvervolt3N",
       "Switch1", "Switch2", "Switch3", "Switch4", "ThermalRelay3",
       "FuseSw1", "FuseSw1N", "FuseSw2", "FuseSw3", "FuseSw3N"].indexOf(kind) >= 0) return "toggle";
+    if (isFuse(kind)) return "fuse"; // only when blown: click replaces it
     return null;
   };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);
