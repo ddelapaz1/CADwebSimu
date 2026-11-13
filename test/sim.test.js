@@ -556,5 +556,49 @@ test("a new element never repeats the name of another of the same type", () => {
   eq(SL.uniqueName(d, "LogicAnd", ""), "", "unnamed elements stay unnamed");
 });
 
+test("rotating several elements turns the whole block, not each element", () => {
+  const build = () => {
+    const d = SL.newDoc();
+    const n = [0, 1, 2, 3].map((i) => SL.makeComp(d, "LogicNand", 300, 150 + 90 * i, 0, "")); // out (360, 165 + 90i)
+    const a = [0, 1].map((i) => SL.makeComp(d, "LogicAnd", 420, 180 + 180 * i, 0, ""));       // ins (420, 180|210 + 180i)
+    [0, 1].forEach((i) => {
+      SL.addWire(d, [360, 165 + 180 * i], [390, 165 + 180 * i]); SL.addWire(d, [390, 165 + 180 * i], [390, 180 + 180 * i]); SL.addWire(d, [390, 180 + 180 * i], [420, 180 + 180 * i]);
+      SL.addWire(d, [360, 255 + 180 * i], [390, 255 + 180 * i]); SL.addWire(d, [390, 255 + 180 * i], [390, 210 + 180 * i]); SL.addWire(d, [390, 210 + 180 * i], [420, 210 + 180 * i]);
+    });
+    return { d, n, a };
+  };
+  const len = (ws) => ws.reduce((t, w) => t + Math.abs(w.a[0] - w.b[0]) + Math.abs(w.a[1] - w.b[1]), 0);
+  const andOut = (d, a) => { const s = new SL.Sim(d); eq(s.tick(d, 0), null); return a.map((g) => s.st[g.id].lo[0]); };
+
+  const { d, n, a } = build();
+  const sel = new Set(d.comps.map((c) => c.id).concat(d.wires.map((w) => w.id)));
+  const before = len(d.wires), rel = (c) => [c.x - n[0].x, c.y - n[0].y];
+  eq(andOut(d, a), [true, true], "NAND(0,0)=1 feeds AND");
+  const res = SL.rotateItems(d, sel, 1, false);
+  eq(res.disconnected, false, "nothing disconnected");
+  eq(len(d.wires), before, "inner conductors keep their length");
+  eq(d.comps.map((c) => c.rot), [1, 1, 1, 1, 1, 1], "every element turned");
+  eq(rel(n[1]), [-90, 0], "gates stacked downwards now sit side by side (right to left)");
+  eq(andOut(d, a), [true, true], "still connected after rotating");
+
+  for (let i = 0; i < 3; i++) SL.rotateItems(d, sel, 1, false);
+  const orig = build();
+  eq(d.comps.map((c) => [c.x - d.comps[0].x, c.y - d.comps[0].y, c.rot]), orig.d.comps.map((c) => [c.x - orig.d.comps[0].x, c.y - orig.d.comps[0].y, c.rot]), "4 turns = original layout");
+
+  const m = build();
+  const msel = new Set(m.d.comps.map((c) => c.id).concat(m.d.wires.map((w) => w.id)));
+  eq(SL.rotateItems(m.d, msel, 0, true).disconnected, false, "mirror the block");
+  eq(m.d.comps.every((c) => c.mirror), true);
+  eq(m.a[0].x < m.n[0].x, true, "ANDs now on the left of the NANDs");
+  eq(andOut(m.d, m.a), [true, true], "mirrored block still works");
+  eq(SL.rotateItems(m.d, msel, 1, false).disconnected, false, "rotate the mirrored block");
+  eq(andOut(m.d, m.a), [true, true], "mirrored + rotated block still works");
+  eq(len(m.d.wires), before, "inner conductors intact");
+
+  const one = build();
+  SL.rotateItems(one.d, new Set([one.n[0].id]), 1, false);
+  eq([one.n[0].x, one.n[0].y, one.n[0].rot], [300, 150, 1], "a single element still turns in place");
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");

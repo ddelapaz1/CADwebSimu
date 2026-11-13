@@ -794,6 +794,8 @@ SL.rotateItems = function (doc, selSet, delta, mirror) {
   var movedComps = doc.comps.filter(function (c) { return selSet.has(c.id); });
   if (!movedComps.length) return { disconnected: false, names: [] };
 
+  if (movedComps.length > 1) return rotateGroup(doc, selSet, movedComps, normDelta, mirror);
+
   return transformItems(doc, selSet, movedComps, {
     shiftPt: null,
     applyTransform: function () {
@@ -804,6 +806,39 @@ SL.rotateItems = function (doc, selSet, delta, mirror) {
     },
   });
 };
+
+/**
+ * Several elements selected: the selection turns (or mirrors) as one block about
+ * the grid point nearest the centre of its bounding box. Each element moves to
+ * its rotated position and turns with it; conductors inside the block turn with
+ * it and the ones leading outside are redrawn.
+ */
+function rotateGroup(doc, selSet, movedComps, normDelta, mirror) {
+  var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  function grow(x, y) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  movedComps.forEach(function (c) { var r = SL.compRect(c); grow(r.x0, r.y0); grow(r.x1, r.y1); });
+  doc.wires.forEach(function (w) { if (selSet.has(w.id)) { grow(w.a[0], w.a[1]); grow(w.b[0], w.b[1]); } });
+  var px = SL.snap((x0 + x1) / 2), py = SL.snap((y0 + y1) / 2);
+  function turn(p) {
+    var q = SL.xform([p[0] - px, p[1] - py], mirror ? 0 : normDelta, !!mirror);
+    return [q[0] + px, q[1] + py];
+  }
+  return transformItems(doc, selSet, movedComps, {
+    shiftPt: turn,
+    applyTransform: function () {
+      movedComps.forEach(function (c) {
+        var o = turn([c.x, c.y]);
+        c.x = o[0]; c.y = o[1];
+        // terminal = xform(local, rot, mirror) + origin must follow `turn`:
+        // a mirrored symbol turns the other way (M·R = R⁻¹·M)
+        if (mirror) c.mirror = !c.mirror;
+        else c.rot = ((((c.rot || 0) + (c.mirror ? -normDelta : normDelta)) % 4) + 4) % 4;
+      });
+      doc.texts.forEach(function (x) { if (selSet.has(x.id)) { var o = turn([x.x, x.y]); x.x = o[0]; x.y = o[1]; } });
+      doc.drawings.forEach(function (x) { if (selSet.has(x.id)) { x.a = turn(x.a); x.b = turn(x.b); } });
+    },
+  });
+}
 
 function transformItems(doc, selSet, movedComps, opts) {
   var key = function (p) { return p[0] + "," + p[1]; };
