@@ -97,6 +97,89 @@
   }
   SL.interlockPairs = interlockPairs;
 
+  // ---------------------------------------------------------------- logic elements
+  // A logic "1" is a node carrying "+"; outputs at 1 feed "+" into their node.
+  SL.LOGIC_PULSE = 0.2; // s, width of the pulses of the pulse generator
+
+  /** Advance a logic element's time-based state by dt (inputs from the previous tick). */
+  function logicTime(c, st, dt) {
+    var inp = !!(st.li && st.li[0]), T = SL.presetSecs(c);
+    switch (c.kind) {
+      case "LogicTon": st.t = inp ? st.t + dt : 0; break;
+      case "LogicTp": if (st.pulse) { st.t += dt; if (st.t >= T) { st.pulse = false; st.t = 0; } } break;
+      case "LogicTof":
+        if (!inp && st.hold) { st.t += dt; if (st.t >= T) { st.hold = false; st.t = 0; } }
+        break;
+      case "LogicFlash":
+        if (inp) { st.t += dt; if (st.t >= Math.max(T, 0.05)) { st.t = 0; st.ph = st.ph === false; } }
+        else { st.t = 0; st.ph = true; }
+        break;
+      case "LogicPulse":
+        if (inp) {
+          st.t += dt;
+          if (st.pt > 0) st.pt -= dt;
+          if (st.t >= Math.max(T, 0.05)) { st.t = 0; st.pt = SL.LOGIC_PULSE; }
+        } else { st.t = 0; st.pt = 0; }
+        break;
+    }
+  }
+
+  /**
+   * Outputs of a logic element from its inputs. `edge(i)` is true once per tick
+   * when input i rises (counters, dividers, pulse timer).
+   */
+  function logicEval(c, ins, st, edge) {
+    var a = !!ins[0], b = !!ins[1], i, n, bits = function (v, k) { var o = []; for (i = 0; i < k; i++) o.push(!!(v >> i & 1)); return o; };
+    var T = SL.presetSecs(c), pre = Math.max(1, c.count_preset | 0 || 3);
+    switch (c.kind) {
+      case "LogicAnd": return [a && b];
+      case "LogicOr": return [a || b];
+      case "LogicXor": return [a !== b];
+      case "LogicNand": return [!(a && b)];
+      case "LogicNor": return [!(a || b)];
+      case "LogicNot": return [!a];
+      case "LogicSR":
+        if (b) st.q = false; else if (a) st.q = true; // reset dominant
+        return [!!st.q, !st.q];
+      case "LogicDiv2":
+        if (edge(0)) st.q = !st.q;
+        if (b) st.q = false;
+        return [!!st.q];
+      case "LogicTon": return [a && st.t >= T];
+      case "LogicTp":
+        if (edge(0) && !st.pulse) { st.pulse = true; st.t = 0; }
+        return [!!st.pulse];
+      case "LogicTof":
+        if (a) { st.hold = true; st.t = 0; }
+        return [a || !!st.hold];
+      case "LogicFlash": return [a && st.ph !== false];
+      case "LogicPulse": return [a && st.pt > 0];
+      case "LogicCnt":
+        if (edge(0)) st.cnt = (st.cnt || 0) + 1;
+        if (b) st.cnt = 0;
+        return [(st.cnt || 0) >= pre];
+      case "LogicCntUD":
+        if (edge(0)) st.cnt = (st.cnt || 0) + 1;
+        if (edge(1)) st.cnt = Math.max(0, (st.cnt || 0) - 1);
+        if (ins[2]) st.cnt = 0;
+        return [(st.cnt || 0) >= pre];
+      case "LogicCnt4": case "LogicCnt10":
+        n = c.kind === "LogicCnt10" ? 10 : 16;
+        if (edge(0)) st.cnt = ((st.cnt || 0) + 1) % n;
+        if (b) st.cnt = 0;
+        return bits(st.cnt || 0, 4);
+      case "LogicCnt4UD":
+        if (edge(0)) st.cnt = ((st.cnt || 0) + 1) % 16;
+        if (edge(1)) st.cnt = ((st.cnt || 0) + 15) % 16;
+        if (ins[2]) st.cnt = 0;
+        return bits(st.cnt || 0, 4);
+      case "LogicProbe": return [!!st.act];
+      case "Logic7Dec": return bits(SL.SEG7[(a ? 1 : 0) | (b ? 2 : 0) | (ins[2] ? 4 : 0) | (ins[3] ? 8 : 0)], 7);
+      case "LogicPreset": return bits(st.val || 0, 4);
+    }
+    return [];
+  }
+
   /** Fixed connectivity: wires, T-junctions, explicit crossing junctions, and terminal positions. */
   function buildTopo(doc) {
     var idx = {}, hIdx = {}, vIdx = {}, pts = [], coordList = [], coordSeen = {};
@@ -197,6 +280,7 @@
       // breakers and switches start closed (estimated)
       self.st[c.id] = { energized: false, on: false, t: 0, act: SL.KINDS[c.kind].role === "Manual" && !!c.closed, // new breakers start open (sub_43ee20 / sub_40d2b0)
         motor: 0, conn: 0, angle: 0, prev: false };
+      if (c.kind === "LogicPreset") self.st[c.id].val = c.value || 0;
     });
   }
 
@@ -293,10 +377,12 @@
     });
     var mask = new Array(n).fill(0);
     doc.comps.forEach(function (c) {
-      var K = SL.KINDS[c.kind];
-      if (K.role !== "Feed") return;
-      var t = topo.terms[c.id];
-      K.feed.forEach(function (f, i) { if (i < t.length) mask[d.find(t[i])] |= f[0]; });
+      var K = SL.KINDS[c.kind], t = topo.terms[c.id];
+      if (K.role === "Feed") K.feed.forEach(function (f, i) { if (i < t.length) mask[d.find(t[i])] |= f[0]; });
+      else if (K.role === "Logic") {
+        var lo = self.s(c.id).lo;
+        if (lo) SL.logicIO(c.kind).outs.forEach(function (ti, k) { if (lo[k] && ti < t.length) mask[d.find(t[ti])] |= P.POS; });
+      }
     });
     for (var pass = 0; pass < 8; pass++) {
       var convAdded = false;
@@ -403,12 +489,13 @@
         if (st.energized) { st.t += dt; if (st.t >= 0.4) { st.t = 0; st.on = !st.on; } }
         else { st.t = 0; st.on = false; }
       }
+      if (SL.KINDS[c.kind].role === "Logic") logicTime(c, st, dt);
       if (st.motor) {
         var speed = c.kind === "Motor3YD" ? (st.conn === 1 ? 3 : 8) : 6;
         st.angle += dt * speed * st.motor;
       }
     });
-    var toggled = {}, counted = {}, ilk = interlockPairs(doc), r = null;
+    var toggled = {}, counted = {}, edged = {}, ilk = interlockPairs(doc), r = null;
     var coilOn = function (name) {
       return doc.comps.some(function (o) { return o.kind === "Coil" && o.name === name && self.s(o.id).on; });
     };
@@ -418,6 +505,19 @@
       for (var trips = 0; r.fault && trips < 8 && this.trip(doc, topo, r.fault); trips++) r = this.solve(doc, topo);
       if (r.fault) { this.fault = r.fault; return r.fault; }
       var changed = false;
+      doc.comps.forEach(function (c) {
+        if (SL.KINDS[c.kind].role !== "Logic") return;
+        var t = topo.terms[c.id], st = self.s(c.id), io = SL.logicIO(c.kind);
+        var ins = io.ins.map(function (ti) { return ti < t.length && !!(r.out[t[ti]] & P.POS); });
+        st.cur = ins;
+        var edge = function (i) {
+          var k = c.id + ":" + i;
+          if (!ins[i] || (st.li && st.li[i]) || edged[k]) return false;
+          return (edged[k] = true);
+        };
+        var outs = logicEval(c, ins, st, edge);
+        if (!st.lo || outs.some(function (o, k) { return o !== st.lo[k]; })) { st.lo = outs; changed = true; }
+      });
       doc.comps.forEach(function (c) {
         if (SL.KINDS[c.kind].role !== "Load") return;
         var t = topo.terms[c.id];
@@ -486,7 +586,7 @@
       });
       if (!changed) break;
     }
-    doc.comps.forEach(function (c) { var st = self.s(c.id); st.prev = st.energized; });
+    doc.comps.forEach(function (c) { var st = self.s(c.id); st.prev = st.energized; if (st.cur) st.li = st.cur.slice(); });
     this.thermalOverload(doc, topo, r, dt);
     return null;
   };
@@ -579,6 +679,13 @@
     });
   };
 
+  /** Preselector: each click moves to the next digit (0..9). */
+  Sim.prototype.stepPreset = function (doc, id) {
+    var st = this.s(id);
+    st.val = ((st.val || 0) + 1) % 10;
+    return st.val;
+  };
+
   SL.Sim = Sim;
 
   SL.clickKind = function (kind) {
@@ -596,6 +703,8 @@
       "Switch1", "Switch2", "Switch3", "Switch4", "ThermalRelay3",
       "FuseSw1", "FuseSw1N", "FuseSw2", "FuseSw3", "FuseSw3N"].indexOf(kind) >= 0) return "toggle";
     if (isFuse(kind)) return "fuse"; // only when blown: click replaces it
+    if (kind === "LogicProbe") return "toggle";
+    if (kind === "LogicPreset") return "preset";
     return null;
   };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);

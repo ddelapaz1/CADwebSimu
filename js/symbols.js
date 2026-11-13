@@ -7,7 +7,7 @@
   var MOTOR_RUN_FILL = "rgb(192,192,192)"; // 0xb8080c
   var HOT_FILL = "rgb(255,175,175)";
 
-  function Sym() { this.prims = []; this.terms = []; this.tlabels = []; }
+  function Sym() { this.prims = []; this.terms = []; this.tlabels = []; this.tdirs = []; }
   Sym.prototype.l = function (a, b) { this.prims.push({ t: "line", a: a, b: b }); };
   Sym.prototype.d = function (a, b) { this.prims.push({ t: "dash", a: a, b: b }); };
   Sym.prototype.c = function (c, r, fill) { this.prims.push({ t: "circle", c: c, r: r, fill: fill }); };
@@ -15,7 +15,29 @@
   Sym.prototype.a = function (c, r, a0, a1) { this.prims.push({ t: "arc", c: c, r: r, a0: a0, a1: a1 }); };
   Sym.prototype.poly = function (pts, closed, fill) { this.prims.push({ t: "poly", pts: pts, closed: closed, fill: fill }); };
   Sym.prototype.text = function (p, s, size) { this.prims.push({ t: "text", p: p, s: s, size: size }); };
-  Sym.prototype.term = function (x, y, label) { this.terms.push([x, y]); this.tlabels.push(label || ""); };
+  Sym.prototype.term = function (x, y, label, dir) { this.terms.push([x, y]); this.tlabels.push(label || ""); this.tdirs.push(dir || null); };
+  /** Push a primitive with its own colour (overrides the component colour). */
+  Sym.prototype.col = function (color) { this.prims[this.prims.length - 1].color = color; };
+
+  // ---- logic elements: inputs on the left (x = 0), outputs on the right (x = 60)
+  var LOGIC_ON = "rgb(220,0,0)", LOGIC_OFF = "rgb(150,150,150)", WHITE = "rgb(255,255,255)";
+  // segments a..g for 0..F
+  var SEG7 = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f, 0x77, 0x7c, 0x39, 0x5e, 0x79, 0x71];
+  SL.SEG7 = SEG7;
+  function lbox(s, y0, y1, x0, x1) { s.r([x0 == null ? 15 : x0, y0], [x1 == null ? 45 : x1, y1], WHITE); }
+  function lin(s, y, txt, v, i) {
+    s.l([0, y], [15, y]);
+    if (v && v.ins) s.col(v.ins[i] ? LOGIC_ON : LOGIC_OFF);
+    if (txt) s.text([20, y], txt, 7);
+    s.term(0, y, "", [-1, 0]);
+  }
+  function lout(s, y, txt, v, i, neg) {
+    if (neg) { s.c([48, y], 3, WHITE); s.l([51, y], [60, y]); } else s.l([45, y], [60, y]);
+    if (v && v.outs) s.col(v.outs[i] ? LOGIC_ON : LOGIC_OFF);
+    if (txt) s.text([39, y], txt, 7);
+    s.term(60, y, "", [1, 0]);
+  }
+  function wave(s, pts) { s.poly(pts.map(function (p) { return [p[0], p[1]]; }), false); }
 
   /** Two-terminal contact between (x,y0) and (x,y0+60); returns the blade midpoint. */
   function contact(s, x, y0, nc, closed, contactor, breaker) {
@@ -809,6 +831,116 @@
           s.term(45, 0, "11"); s.term(30, 60, "12"); s.term(60, 60, "14");
         }
         break;
+      case "LogicAnd": case "LogicOr": case "LogicXor": case "LogicNand": case "LogicNor": {
+        lbox(s, -12, 42);
+        s.text([30, 15], { LogicAnd: "&", LogicNand: "&", LogicOr: "≥1", LogicNor: "≥1", LogicXor: "=1" }[kind], 12);
+        lin(s, 0, "", v, 0); lin(s, 30, "", v, 1);
+        lout(s, 15, "", v, 0, kind === "LogicNand" || kind === "LogicNor");
+        break;
+      }
+      case "LogicNot":
+        lbox(s, -12, 12);
+        s.text([30, 0], "1", 12);
+        lin(s, 0, "", v, 0); lout(s, 0, "", v, 0, true);
+        break;
+      case "LogicSR":
+        lbox(s, -12, 42);
+        lin(s, 0, "S", v, 0); lin(s, 30, "R", v, 1);
+        lout(s, 0, "Q", v, 0); lout(s, 30, "", v, 1, true);
+        break;
+      case "LogicDiv2":
+        lbox(s, -12, 42);
+        s.text([30, 15], "÷2", 9);
+        lin(s, 0, "C", v, 0); lin(s, 30, "R", v, 1);
+        lout(s, 0, "Q", v, 0);
+        break;
+      case "LogicTon": case "LogicTp": case "LogicTof": case "LogicFlash": case "LogicPulse":
+        lbox(s, -15, 15);
+        wave(s, {
+          LogicTon: [[19, 8], [29, 8], [29, -7], [41, -7]],
+          LogicTp: [[19, 8], [23, 8], [23, -7], [33, -7], [33, 8], [41, 8]],
+          LogicTof: [[19, -7], [33, -7], [33, 8], [41, 8]],
+          LogicFlash: [[19, 8], [19, -7], [25, -7], [25, 8], [31, 8], [31, -7], [37, -7], [37, 8], [41, 8]],
+          LogicPulse: [[19, 8], [22, 8], [22, -7], [24, -7], [24, 8], [32, 8], [32, -7], [34, -7], [34, 8], [41, 8]],
+        }[kind]);
+        lin(s, 0, "", v, 0); lout(s, 0, "", v, 0);
+        break;
+      case "LogicCnt":
+        lbox(s, -12, 42);
+        s.text([30, 15], "CTU", 7);
+        lin(s, 0, "C", v, 0); lin(s, 30, "R", v, 1);
+        lout(s, 0, "Q", v, 0);
+        break;
+      case "LogicCntUD":
+        lbox(s, -12, 72);
+        s.text([31, 45], "CTUD", 7);
+        lin(s, 0, "+", v, 0); lin(s, 30, "−", v, 1); lin(s, 60, "R", v, 2);
+        lout(s, 0, "Q", v, 0);
+        break;
+      case "LogicCnt4": case "LogicCnt4UD": case "LogicCnt10":
+        lbox(s, -12, 102);
+        s.text([30, kind === "LogicCnt4UD" ? 112 : 112], kind === "LogicCnt10" ? "BCD" : kind === "LogicCnt4UD" ? "±BIN" : "BIN", 8);
+        if (kind === "LogicCnt4UD") { lin(s, 0, "+", v, 0); lin(s, 30, "−", v, 1); lin(s, 60, "R", v, 2); }
+        else { lin(s, 0, "C", v, 0); lin(s, 30, "R", v, 1); }
+        ["1", "2", "4", "8"].forEach(function (t, i) { lout(s, 30 * i, t, v, i); });
+        break;
+      case "LogicProbe":
+        s.r([0, -12], [30, 12], v.outs && v.outs[0] ? "rgb(255,210,210)" : WHITE);
+        s.text([15, 0], v.outs && v.outs[0] ? "1" : "0", 12);
+        s.poly([[30, -6], [36, 0], [30, 6]], false);
+        s.l([36, 0], [45, 0]);
+        if (v.outs) s.col(v.outs[0] ? LOGIC_ON : LOGIC_OFF);
+        s.term(45, 0, "", [1, 0]);
+        break;
+      case "LogicView":
+        s.l([0, 0], [9, 0]);
+        if (v.ins) s.col(v.ins[0] ? LOGIC_ON : LOGIC_OFF);
+        s.poly([[15, -6], [9, 0], [15, 6]], false);
+        s.r([15, -12], [45, 12], v.ins && v.ins[0] ? "rgb(255,210,210)" : WHITE);
+        s.text([30, 0], v.ins && v.ins[0] ? "1" : "0", 12);
+        s.term(0, 0, "", [-1, 0]);
+        break;
+      case "Logic7Dec":
+        lbox(s, -12, 102);
+        s.text([30, 112], "BCD/7", 7);
+        ["1", "2", "4", "8"].forEach(function (t, i) { lin(s, 30 * i, t, v, i); });
+        "abcdefg".split("").forEach(function (t, i) { lout(s, 15 * i, t, v, i); });
+        break;
+      case "Logic7Seg": case "Logic7SegDp": {
+        var nseg = kind === "Logic7SegDp" ? 8 : 7, ON7 = "rgb(255,40,40)", OFF7 = "rgb(75,75,75)";
+        s.r([15, -12], [75, 15 * nseg + 3], "rgb(35,35,35)");
+        "abcdefgp".slice(0, nseg).split("").forEach(function (t, i) {
+          s.l([0, 15 * i], [15, 15 * i]);
+          if (v.ins) s.col(v.ins[i] ? LOGIC_ON : LOGIC_OFF);
+          s.text([20, 15 * i], t === "p" ? "dp" : t, 6); s.col("rgb(200,200,200)");
+          s.term(0, 15 * i, "", [-1, 0]);
+        });
+        var X0 = 38, X1 = 60, Y0 = 8, Ym = 43, Y1 = 78;
+        var segs = [
+          [[X0 + 2, Y0 - 2], [X1 - 2, Y0 + 2]], [[X1 - 2, Y0 + 2], [X1 + 2, Ym - 2]], [[X1 - 2, Ym + 2], [X1 + 2, Y1 - 2]],
+          [[X0 + 2, Y1 - 2], [X1 - 2, Y1 + 2]], [[X0 - 2, Ym + 2], [X0 + 2, Y1 - 2]], [[X0 - 2, Y0 + 2], [X0 + 2, Ym - 2]],
+          [[X0 + 2, Ym - 2], [X1 - 2, Ym + 2]],
+        ];
+        segs.forEach(function (sg, i) { var c = v.ins && v.ins[i] ? ON7 : OFF7; s.r(sg[0], sg[1], c); s.col(c); });
+        if (nseg === 8) { var cdp = v.ins && v.ins[7] ? ON7 : OFF7; s.c([X1 + 7, Y1], 2.5, cdp); s.col(cdp); }
+        break;
+      }
+      case "LogicPreset":
+        lbox(s, -12, 102);
+        s.r([19, 25], [36, 65], "rgb(255,255,220)");
+        s.text([27.5, 45], String(v.val || 0), 18);
+        s.text([27.5, 15], "▲", 7); s.text([27.5, 75], "BCD", 6);
+        ["1", "2", "4", "8"].forEach(function (t, i) { lout(s, 30 * i, t, v, i); });
+        break;
+      case "LogicWire":
+        s.l([0, 15], [30, 15]); s.col(LOGIC_ON);
+        s.text([15, 4], "+", 9); s.col(LOGIC_ON);
+        break;
+      case "LogicJunction":
+        s.l([-15, 0], [15, 0]); s.col(LOGIC_ON);
+        s.l([0, -15], [0, 15]); s.col(LOGIC_ON);
+        s.c([0, 0], 4.5, "#1a1a1a");
+        break;
       case "Wire":
         s.l([0, 3], [0, 27]); s.l([0, 27], [24, 27]);
         s.c([0, 3], 3, "rgb(220,53,69)");
@@ -852,6 +984,15 @@
     return [mn, mx];
   };
 
+  /** Indices of a logic element's input and output terminals (by pin direction). */
+  var ioCache = {};
+  SL.logicIO = function (kind) {
+    if (ioCache[kind]) return ioCache[kind];
+    var sym = SL.buildSymbol(kind, {}), io = { ins: [], outs: [] };
+    sym.tdirs.forEach(function (d, i) { if (d) (d[0] < 0 ? io.ins : io.outs).push(i); });
+    return (ioCache[kind] = io);
+  };
+
   /** World-space terminals of a component. */
   SL.terminals = function (c) {
     var sym = SL.buildSymbol(c.kind, {});
@@ -864,9 +1005,9 @@
   /** World-space terminals with outward unit vector: [{pos:[x,y], dir:[dx,dy]}]. */
   SL.terminalsWithDir = function (c) {
     var sym = SL.buildSymbol(c.kind, {});
-    return sym.terms.map(function (t) {
+    return sym.terms.map(function (t, i) {
       var p = SL.xform(t, c.rot, c.mirror);
-      var localDir = t[1] === 0 ? [0, -1] : (t[1] === 30 && t[0] < 0) ? [-1, 0] : (t[1] === 30 && t[0] > 0 && c.kind === "Rectifier") ? [1, 0] : [0, 1];
+      var localDir = sym.tdirs[i] ? sym.tdirs[i] : t[1] === 0 ? [0, -1] : (t[1] === 30 && t[0] < 0) ? [-1, 0] : (t[1] === 30 && t[0] > 0 && c.kind === "Rectifier") ? [1, 0] : [0, 1];
       var d = SL.xform(localDir, c.rot, c.mirror);
       return {
         pos: [Math.round(p[0]) + c.x, Math.round(p[1]) + c.y],

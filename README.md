@@ -18,6 +18,10 @@ Editor i simulador d'esquemes elèctrics de comandament i potència que funciona
   canvien fent-hi clic. El relé tèrmic dispara si el motor treballa amb només dues fases.
 - Comptador de polsos amb preselecció i entrada de posada a zero (R), interruptor horari amb
   programa ON/OFF cíclic, díode amb sentit de conducció i enclavament mecànic entre contactors.
+- Lògica (un "1" és un node amb "+"): portes AND, OR, NOT, XOR, NAND, NOR, biestable SR, divisor
+  binari, temporitzadors (connexió, pols, desconnexió, intermitent, generador de polsos), comptadors
+  (simple, asc/desc, 4 bits, 4 bits asc/desc, dècades), prova, visualitza, preselector,
+  decodificador i displays de 7 segments.
 - Diversos esquemes oberts alhora, desfer/refer, copiar/enganxar, caixetí, formats A4/A3,
   exportar a PNG i imprimir.
 - Els esquemes es desen com a fitxers `.ecs`, compatibles amb la versió per a macOS, i la

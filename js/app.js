@@ -302,8 +302,9 @@
     if (K.role === "Contact" || K.role === "Poles") {
       var want = function (k) {
         if (kind.indexOf("Thermal") === 0) return k === "ThermalRelay3";
-        if (kind.indexOf("Timed") === 0) return SL.KINDS[k].timer;
-        return k === "Coil" || k === "StepRelay" || SL.KINDS[k].timer;
+        var timer = SL.KINDS[k].timer && SL.KINDS[k].role !== "Logic";
+        if (kind.indexOf("Timed") === 0) return timer;
+        return k === "Coil" || k === "StepRelay" || timer;
       };
       for (var i = doc.comps.length - 1; i >= 0; i--) {
         var c = doc.comps[i];
@@ -490,10 +491,12 @@
       body.push(row("Temps desconnectat (OFF):", offBase));
       body.push(el("div", { class: "hint", text: "Amb tensió a A1-A2 repeteix el programa: ON i després OFF (mateix multiplicador)." }));
     }
-    if (c.kind === "Counter") {
+    if (K.counter) {
       preset = el("input", { type: "number", step: "1", min: "1", style: "width:80px" }); preset.value = c.count_preset || 3;
       body.push(row("Preselecció (polsos):", preset));
-      body.push(el("div", { class: "hint", text: "Compta els polsos a A1-A2; en arribar a la preselecció actua els seus contactes. Tensió entre R i A2 el posa a zero." }));
+      body.push(el("div", { class: "hint", text: c.kind === "Counter"
+        ? "Compta els polsos a A1-A2; en arribar a la preselecció actua els seus contactes. Tensió entre R i A2 el posa a zero."
+        : "La sortida Q s'activa quan el compte arriba a la preselecció. R el posa a zero." }));
     }
     if (c.kind === "Lamp" || c.kind === "LampFlash" || c.kind === "PushBtn") {
       color = radios("color", SL.LAMP_COLOR_OPTIONS || Object.keys(SL.LAMP_COLORS).map(function (k) { return [k, k]; }), c.color);
@@ -501,7 +504,7 @@
     }
     if (K.role === "Contact" || K.role === "Poles") body.push(el("div", { class: "hint", text: "Els contactes segueixen la bobina, temporitzador o relé tèrmic amb el mateix nom." }));
     if (K.role === "Actuator") body.push(el("div", { class: "hint", text: "Tots els accionaments amb el mateix nom es mouen alhora." }));
-    var title = c.kind === "TimeSwitch" ? "Interruptor horari" : c.kind === "Counter" ? "Comptador" : K.timer ? "Temporitzadors" : (c.kind === "Lamp" || c.kind === "LampFlash" || c.kind === "PushBtn") ? "Indicador color" : "Edita";
+    var title = c.kind === "TimeSwitch" ? "Interruptor horari" : K.counter ? "Comptador" : K.timer ? "Temporitzadors" : (c.kind === "Lamp" || c.kind === "LampFlash" || c.kind === "PushBtn") ? "Indicador color" : "Edita";
     dialog(title, body, [["D'acord", function () {
       A.checkpoint();
       c.name = name.value.trim(); c.func = func.value;

@@ -20,6 +20,7 @@ SL.CATS = [
   { id: "Detectors", label: "Detectors", bar: "Barra de detectors", icon: "DetIndNO" },
   { id: "Coils", label: "Bobines, Senyalitzacions", bar: "Barra de bobines", icon: "Coil" },
   { id: "ElecRelays", label: "Relés electrònics", bar: "Barra de relés electrònics", icon: "SsrDC" },
+  { id: "Logic", label: "Lògica", bar: "Barra de lògica", icon: "LogicAnd" },
   { id: "Connections", label: "Cables i Connexions", bar: "Barra de connexions", icon: "Terminal" },
 ];
 
@@ -188,6 +189,32 @@ SL.CATS = [
     ["PermOvervolt3N", "ElecRelays", "Protecció contra sobretensions permanents III", "Manual", 4, false, "-Q"],
     ["CoilContactNO", "ElecRelays", "Bobina contacte NA", "Load", 0, false, "-KA"],
     ["CoilContactCO", "ElecRelays", "Bobina contacte NC COM", "Load", 0, false, "-KA"],
+    ["LogicAnd", "Logic", "AND", "Logic", 0, false, ""],
+    ["LogicOr", "Logic", "OR", "Logic", 0, false, ""],
+    ["LogicNot", "Logic", "NOT", "Logic", 0, false, ""],
+    ["LogicXor", "Logic", "XOR", "Logic", 0, false, ""],
+    ["LogicNand", "Logic", "NAND", "Logic", 0, false, ""],
+    ["LogicNor", "Logic", "NOR", "Logic", 0, false, ""],
+    ["LogicSR", "Logic", "Biestable SR", "Logic", 0, false, "-KA"],
+    ["LogicDiv2", "Logic", "Divisor binari", "Logic", 0, false, "-KA"],
+    ["LogicTon", "Logic", "Temporitzador connexió", "Logic", 0, false, "-KT"],
+    ["LogicTp", "Logic", "Temporitzador pols connexió", "Logic", 0, false, "-KT"],
+    ["LogicTof", "Logic", "Temporitzador desconnexió", "Logic", 0, false, "-KT"],
+    ["LogicFlash", "Logic", "Temporitzador intermitent", "Logic", 0, false, "-KT"],
+    ["LogicPulse", "Logic", "Temporitzador generador de polsos", "Logic", 0, false, "-KT"],
+    ["LogicCnt", "Logic", "Comptador", "Logic", 0, false, "-KC"],
+    ["LogicCntUD", "Logic", "Comptador ascendent - descendent", "Logic", 0, false, "-KC"],
+    ["LogicCnt4", "Logic", "Comptador 4 bits", "Logic", 0, false, "-KC"],
+    ["LogicCnt4UD", "Logic", "Comptador 4 bits asc - desc", "Logic", 0, false, "-KC"],
+    ["LogicCnt10", "Logic", "Comptador 4 bits dècades", "Logic", 0, false, "-KC"],
+    ["LogicProbe", "Logic", "Prova", "Logic", 0, false, "-S"],
+    ["LogicView", "Logic", "Visualitza", "Logic", 0, false, "-P"],
+    ["Logic7Dec", "Logic", "Decodificador 7 segments", "Logic", 0, false, "-U"],
+    ["Logic7Seg", "Logic", "Display de 7 segments", "Logic", 0, false, "-P"],
+    ["Logic7SegDp", "Logic", "Display de 7 segments amb punt decimal", "Logic", 0, false, "-P"],
+    ["LogicPreset", "Logic", "Preselector", "Logic", 0, false, "-S"],
+    ["LogicWire", "Logic", "Cable positiu", "Tool", 0, false, "", "wire"],
+    ["LogicJunction", "Logic", "Connexió", "Tool", 0, false, "", "junction"],
     ["Wire", "Connections", "Cable", "Tool", 0, false, "", "wire"],
     ["Junction", "Connections", "Punt de connexió", "Tool", 0, false, "", "junction"],
     ["Terminal", "Connections", "Born", "Passive", 0, false, "-X"],
@@ -217,7 +244,9 @@ SL.CATS = [
       tool: r[7] || null,
       feed: feeds[r[0]] || [],
     };
-    k.timer = ["TimerOn", "TimerOff", "TimerOnOff", "Flasher", "PulseGen", "TimeSwitch"].indexOf(k.id) >= 0;
+    k.timer = ["TimerOn", "TimerOff", "TimerOnOff", "Flasher", "PulseGen", "TimeSwitch",
+      "LogicTon", "LogicTp", "LogicTof", "LogicFlash", "LogicPulse"].indexOf(k.id) >= 0;
+    k.counter = ["Counter", "LogicCnt", "LogicCntUD"].indexOf(k.id) >= 0; // has a count preset
     k.driver = ["Coil", "LatchCoil", "StepRelay", "Solenoid", "TimerOn", "TimerOff", "TimerOnOff", "Flasher",
       "PulseGen", "TimeSwitch", "Counter", "ThermalRelay3",
       "SoftCtrl", "SoftRevCtrl", "VfdACCtrl", "DriveDCCtrl",
@@ -267,6 +296,7 @@ SL.normalizeDoc = function (d) {
       closed: !!c.closed, // breaker position, kept with the schematic
       count_preset: c.count_preset == null ? 3 : Math.max(1, +c.count_preset | 0), // pulse counter
       off_base: c.off_base == null ? 5 : +c.off_base, // time switch: OFF time (same multiplier)
+      value: Math.max(0, Math.min(9, +c.value | 0)), // logic preselector digit
     };
   });
   n.wires = (d.wires || []).map(function (w) { return { id: w.id, a: [w.a[0], w.a[1]], b: [w.b[0], w.b[1]] }; });
@@ -1139,7 +1169,7 @@ SL.makeComp = function (doc, kind, x, y, rot, name, extra) {
   var c = {
     id: SL.newId(doc), kind: kind, x: x, y: y, rot: rot || 0, mirror: false,
     name: name || "", func: "", time_base: 5, time_mult: 1, color: "Verde", closed: false,
-    count_preset: 3, off_base: 5,
+    count_preset: 3, off_base: 5, value: 0,
   };
   if (extra) Object.assign(c, extra);
   doc.comps.push(c);

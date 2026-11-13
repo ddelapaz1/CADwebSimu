@@ -42,7 +42,18 @@
         vis.pos = st.pos || 0;
         if (st.blown) { vis.blown = true; extra = "fos"; }
         else if (st.tripped && !st.act) extra = "disparat";
-        if (K.role === "Load") {
+        if (K.role === "Logic") {
+          vis.ins = st.cur || []; vis.outs = st.lo || []; vis.val = st.val || 0;
+          color = vis.outs.some(Boolean) && !/^Logic7/.test(c.kind) ? C.RED : C.GRAY;
+          if (c.kind === "LogicCnt" || c.kind === "LogicCntUD") extra = (st.cnt || 0) + " / " + Math.max(1, c.count_preset | 0 || 3);
+          else if (/^LogicCnt/.test(c.kind)) extra = String(st.cnt || 0);
+          else if (K.timer) {
+            var T = SL.presetSecs(c), on = !!(st.cur && st.cur[0]);
+            if (c.kind === "LogicTon" && on && !vis.outs[0]) extra = Math.max(0, T - st.t).toFixed(1) + " s";
+            else if (c.kind === "LogicTp" && st.pulse) extra = Math.max(0, T - st.t).toFixed(1) + " s";
+            else if (c.kind === "LogicTof" && !on && st.hold) extra = Math.max(0, T - st.t).toFixed(1) + " s";
+          }
+        } else if (K.role === "Load") {
           vis.active = st.energized || st.on;
           if ((c.kind === "Lamp" || c.kind === "LampFlash") && (c.kind === "Lamp" ? st.energized : st.on)) {
             vis.lamp = SL.rgb(SL.LAMP_COLORS[c.color] || SL.LAMP_COLORS.Verde);
@@ -72,6 +83,7 @@
         } else color = vis.closed ? C.RED : C.GRAY;
       } else {
         vis.closed = K.role === "Manual" ? !!c.closed : K.nc; // contacts at rest, breakers as stored
+        if (c.kind === "LogicPreset") vis.val = c.value || 0;
       }
       var isSel = sel.has(c.id), cc = c;
       if (isSel && (dx || dy)) { cc = Object.assign({}, c); cc.x += dx; cc.y += dy; }
@@ -167,6 +179,10 @@
       var c = clickable(w);
       if (!c) return;
       if (SL.clickKind(c.kind) === "fuse") t.sim.replaceFuse(t.doc, c.id);
+      else if (SL.clickKind(c.kind) === "preset") {
+        c.value = t.sim.stepPreset(t.doc, c.id); // remembered for the next run
+        t.dirty = true; A.changed();
+      }
       else if (SL.clickKind(c.kind) === "momentary") { t.sim.setActuator(t.doc, c.id, true); A.pressed = c.id; cv.setPointerCapture(e.pointerId); }
       else {
         var nv = !t.sim.s(c.id).act;

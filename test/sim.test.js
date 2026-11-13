@@ -424,5 +424,120 @@ test("moving a whole block with its conductors keeps every conductor", () => {
   eq(s.st[id("Motor3", "-M1")].motor, 1, "moved control circuit still works");
 });
 
+// ---------------------------------------------------------------- logic
+// Pins: inputs at (x, y + 30*i), outputs at (x + 60, ...). Probes drive inputs; we read st.lo.
+function logicRig(kind, nIn, extra) {
+  const d = SL.newDoc();
+  const g = SL.makeComp(d, kind, 300, 300, 0, "-U1", extra || {});
+  const io = SL.logicIO(kind), tp = SL.terminals(g);
+  const probes = io.ins.slice(0, nIn).map((ti, i) => {
+    const p = tp[ti];
+    const pr = SL.makeComp(d, "LogicProbe", p[0] - 105, p[1], 0, "-S" + (i + 1)); // output at (p.x - 60, p.y)
+    SL.addWire(d, [p[0] - 60, p[1]], p);
+    return pr;
+  });
+  const s = new SL.Sim(d);
+  const set = (vals, dt) => { vals.forEach((v, i) => s.setActuator(d, probes[i].id, !!v)); return s.tick(d, dt || 0); };
+  return { d, s, g, set, out: () => s.st[g.id].lo.map(Number) };
+}
+
+test("logic gates truth tables", () => {
+  const tt = { LogicAnd: [0, 0, 0, 1], LogicOr: [0, 1, 1, 1], LogicXor: [0, 1, 1, 0], LogicNand: [1, 1, 1, 0], LogicNor: [1, 0, 0, 0] };
+  Object.keys(tt).forEach((k) => {
+    const r = logicRig(k, 2);
+    const got = [[0, 0], [1, 0], [0, 1], [1, 1]].map((v) => { eq(r.set(v), null); return r.out()[0]; });
+    eq(got, tt[k], k);
+  });
+  const n = logicRig("LogicNot", 1);
+  n.set([0]); eq(n.out(), [1]); n.set([1]); eq(n.out(), [0]);
+});
+
+test("SR flip-flop and binary divider", () => {
+  const sr = logicRig("LogicSR", 2);
+  sr.set([1, 0]); sr.set([0, 0]); eq(sr.out(), [1, 0], "set and hold");
+  sr.set([1, 1]); eq(sr.out(), [0, 1], "reset dominant");
+  const dv = logicRig("LogicDiv2", 2);
+  const seq = [];
+  for (let i = 0; i < 4; i++) { dv.set([1, 0]); seq.push(dv.out()[0]); dv.set([0, 0]); }
+  eq(seq, [1, 0, 1, 0], "toggles on each rising edge");
+});
+
+test("logic timers", () => {
+  const T = { time_base: 1, time_mult: 1 };
+  const ton = logicRig("LogicTon", 1, T);
+  ton.set([1], 0); for (let i = 0; i < 5; i++) ton.set([1], 0.1); eq(ton.out(), [0], "TON waiting");
+  for (let i = 0; i < 7; i++) ton.set([1], 0.1); eq(ton.out(), [1], "TON on after 1 s");
+  ton.set([0], 0.1); eq(ton.out(), [0]);
+
+  const tp = logicRig("LogicTp", 1, T);
+  tp.set([1], 0); eq(tp.out(), [1], "pulse starts on rising edge"); tp.set([0], 0.1);
+  for (let i = 0; i < 12; i++) tp.set([0], 0.1); eq(tp.out(), [0], "pulse ends after 1 s");
+
+  const tof = logicRig("LogicTof", 1, T);
+  tof.set([1], 0.1); tof.set([0], 0.1); eq(tof.out(), [1], "TOF holds");
+  for (let i = 0; i < 12; i++) tof.set([0], 0.1); eq(tof.out(), [0], "TOF off after 1 s");
+
+  const fl = logicRig("LogicFlash", 1, T);
+  const v = [];
+  fl.set([1], 0); for (let i = 0; i < 30; i++) { fl.set([1], 0.1); v.push(fl.out()[0]); }
+  eq(v.includes(0) && v.includes(1), true, "flashes");
+
+  const pg = logicRig("LogicPulse", 1, T);
+  let pulses = 0, prev = 0;
+  pg.set([1], 0); for (let i = 0; i < 35; i++) { pg.set([1], 0.1); const o = pg.out()[0]; if (o && !prev) pulses++; prev = o; }
+  eq(pulses, 3, "one short pulse per second");
+});
+
+test("logic counters", () => {
+  const c = logicRig("LogicCnt", 2, { count_preset: 3 });
+  const pulse = (r, vals) => { r.set(vals); r.set(vals.map(() => 0)); };
+  pulse(c, [1, 0]); pulse(c, [1, 0]); eq(c.out(), [0]); pulse(c, [1, 0]); eq(c.out(), [1], "reaches preset");
+  c.set([0, 1]); eq([c.out()[0], c.s.st[c.g.id].cnt], [0, 0], "reset");
+
+  const ud = logicRig("LogicCntUD", 3, { count_preset: 2 });
+  pulse(ud, [1, 0, 0]); pulse(ud, [1, 0, 0]); eq(ud.out(), [1]); pulse(ud, [0, 1, 0]); eq(ud.out(), [0], "counts down");
+
+  const b4 = logicRig("LogicCnt4", 2);
+  for (let i = 0; i < 5; i++) pulse(b4, [1, 0]);
+  eq(b4.out(), [1, 0, 1, 0], "binary 5");
+  for (let i = 0; i < 11; i++) pulse(b4, [1, 0]);
+  eq(b4.out(), [0, 0, 0, 0], "wraps at 16");
+
+  const ud4 = logicRig("LogicCnt4UD", 3);
+  pulse(ud4, [0, 1, 0]); eq(ud4.out(), [1, 1, 1, 1], "0 - 1 = 15");
+
+  const bcd = logicRig("LogicCnt10", 2);
+  for (let i = 0; i < 9; i++) pulse(bcd, [1, 0]);
+  eq(bcd.out(), [1, 0, 0, 1], "9");
+  pulse(bcd, [1, 0]); eq(bcd.out(), [0, 0, 0, 0], "decade wraps to 0");
+});
+
+test("preselector -> 7-segment decoder -> display", () => {
+  const d = SL.newDoc();
+  const ps = SL.makeComp(d, "LogicPreset", 150, 150, 0, "-S1", { value: 7 }); // outs (210, 150..240 step 30)
+  const dec = SL.makeComp(d, "Logic7Dec", 300, 150, 0, "-U1");               // ins (300, 150..240), outs (360, 150..240 step 15)
+  const dsp = SL.makeComp(d, "Logic7Seg", 450, 150, 0, "-P1");               // ins (450, 150..240 step 15)
+  for (let i = 0; i < 4; i++) SL.addWire(d, [210, 150 + 30 * i], [300, 150 + 30 * i]);
+  for (let i = 0; i < 7; i++) SL.addWire(d, [360, 150 + 15 * i], [450, 150 + 15 * i]);
+  const s = new SL.Sim(d);
+  eq(s.tick(d, 0.1), null);
+  const segs = () => s.st[dsp.id].cur.map(Number).join("");
+  eq(segs(), "1110000", "7 = a b c");
+  s.stepPreset(d, ps.id); s.tick(d, 0);
+  eq(segs(), "1111111", "8 = all segments");
+  s.stepPreset(d, ps.id); s.stepPreset(d, ps.id); s.tick(d, 0);
+  eq(segs(), "1111110", "0");
+});
+
+test("Prova drives Visualitza", () => {
+  const d = SL.newDoc();
+  const pr = SL.makeComp(d, "LogicProbe", 150, 150, 0, "-S1");   // out (195,150)
+  const v = SL.makeComp(d, "LogicView", 300, 150, 0, "-P1");     // in (300,150)
+  SL.addWire(d, [195, 150], [300, 150]);
+  const s = new SL.Sim(d);
+  eq(s.tick(d, 0), null); eq(s.st[v.id].cur, [false]);
+  s.setActuator(d, pr.id, true); s.tick(d, 0); eq(s.st[v.id].cur, [true], "Visualitza shows 1");
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");
