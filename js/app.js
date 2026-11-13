@@ -795,10 +795,10 @@
     var statusEl = $("statusbar");
     var menuBottom = menuEl ? menuEl.getBoundingClientRect().bottom : 0;
     var statusTop = (statusEl && !statusEl.hidden) ? statusEl.getBoundingClientRect().top : window.innerHeight;
-    if (cx <= 56) return "left";
-    if (cx >= window.innerWidth - 56) return "right";
-    if (cy <= menuBottom + 44) return "top";
-    if (cy >= statusTop - 44) return "bottom";
+    if (cx <= 36) return "left";
+    if (cx >= window.innerWidth - 36) return "right";
+    if (cy <= menuBottom + 24) return "top";
+    if (cy >= statusTop - 24) return "bottom";
     return "float";
   }
 
@@ -946,24 +946,8 @@
     attachTip(h, "Arrossega per moure o ancorar als laterals (doble clic si és flotant per girar)");
 
     var st = null;
-    h.addEventListener("pointerdown", function (e) {
-      if (e.button !== 0) return;
-      hideTip();
-      var bar = $(id);
-      var rect = bar.getBoundingClientRect();
-      st = {
-        id: e.pointerId,
-        startX: e.clientX,
-        startY: e.clientY,
-        offsetX: e.clientX - rect.left,
-        offsetY: e.clientY - rect.top,
-        dragging: false,
-        zone: A.bars[id].dock,
-      };
-      h.setPointerCapture(e.pointerId);
-    });
-    h.addEventListener("pointermove", function (e) {
-      if (!st || !h.hasPointerCapture(e.pointerId)) return;
+    function onDocMove(e) {
+      if (!st || e.pointerId !== st.id) return;
       var bar = $(id);
       if (!st.dragging) {
         if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) < 4) return;
@@ -982,9 +966,12 @@
       clampFloatingBar(id, bar);
       st.zone = detectDockZone(e.clientX, e.clientY);
       updateDockPreview(st.zone);
-    });
-    function finishDrag() {
-      if (!st) return;
+    }
+    function onDocUp(e) {
+      if (!st || e.pointerId !== st.id) return;
+      document.removeEventListener("pointermove", onDocMove);
+      document.removeEventListener("pointerup", onDocUp);
+      document.removeEventListener("pointercancel", onDocUp);
       var wasDragging = st.dragging, zone = st.zone;
       st = null;
       h.classList.remove("dragging");
@@ -993,7 +980,25 @@
         setBarDock(id, zone, A.bars[id].x, A.bars[id].y);
       }
     }
-    h.addEventListener("lostpointercapture", finishDrag);
+    h.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      hideTip();
+      var bar = $(id);
+      var rect = bar.getBoundingClientRect();
+      st = {
+        id: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        offsetX: e.clientX - rect.left,
+        offsetY: e.clientY - rect.top,
+        dragging: false,
+        zone: A.bars[id].dock,
+      };
+      document.addEventListener("pointermove", onDocMove);
+      document.addEventListener("pointerup", onDocUp);
+      document.addEventListener("pointercancel", onDocUp);
+    });
     h.addEventListener("dblclick", function (e) {
       e.stopPropagation();
       if (A.bars[id].dock === "float") {
