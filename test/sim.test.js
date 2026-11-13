@@ -765,5 +765,23 @@ test("event log and timing signals", () => {
   eq(s.sig[id("Coil", "-KM1")].changes.map((c) => c[1]), [0, 1], "timing chart transitions");
 });
 
+test("current flow: from the source to the load and back on N", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedLN", 300, 120, 0, "");               // L (300,150) N (330,150)
+  const sw = SL.makeComp(d, "Switch1", 300, 180, 0, "-Q1"); // (300,180)-(300,240)
+  const h = SL.makeComp(d, "Lamp", 300, 300, 0, "-H1");    // (300,300)-(300,360)
+  SL.addWire(d, [300, 150], [300, 180]); SL.addWire(d, [300, 240], [300, 300]);
+  SL.addWire(d, [300, 360], [330, 360]); SL.addWire(d, [330, 360], [330, 150]);
+  const s = new SL.Sim(d); s.tick(d, 0.1);
+  eq(s.currentFlow(d).length, 0, "switch open: no current");
+  s.setActuator(d, sw.id, true); s.tick(d, 0.1);
+  const f = s.currentFlow(d);
+  const down = f.find((x) => x.from[0] === 300 && x.from[1] === 240);
+  eq(!!down && down.to[1] === 300, true, "phase: towards the lamp");
+  const back = f.find((x) => x.from[0] === 330 && x.from[1] === 360);
+  eq(!!back && back.to[1] === 150, true, "neutral: back to the feed");
+  eq(f.length, 4, "every conductor of the loop carries current");
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");

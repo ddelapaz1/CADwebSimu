@@ -335,7 +335,7 @@
   function n(v) { return Math.round(v * 100) / 100; }
   function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
   SvgCtx.prototype = {
-    setTransform: function () {}, clearRect: function () {}, lineJoin: "round", lineCap: "round",
+    setTransform: function () {}, clearRect: function () {}, save: function () {}, restore: function () {}, lineJoin: "round", lineCap: "round",
     setLineDash: function (a) { this.dash = a || []; },
     beginPath: function () { this.d = ""; },
     moveTo: function (x, y) { this.d += "M" + n(x) + " " + n(y); },
@@ -422,5 +422,155 @@
       return [g.ref || "—", SL.KINDS[g.kind].label, g.func, g.n, g.sym].map(q).join(";");
     }).join("\n");
     A.download(A.tab().title + "-materials.csv", new Blob(["﻿" + csv], { type: "text/csv" }));
+  };
+
+  // ================================================================ view preferences, theme, legend
+  var PREF_KEY = "simulab.view.v1", prefs = { props: true, minimap: true, legend: false, flow: true };
+  try { Object.assign(prefs, JSON.parse(localStorage.getItem(PREF_KEY) || "{}")); } catch (e) { /* private mode */ }
+  A.prefOn = function (k) { return !!prefs[k]; };
+  A.togglePref = function (k) {
+    prefs[k] = !prefs[k];
+    try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) { /* private mode */ }
+    A.refreshAll(); A.redraw();
+  };
+  try { A.theme = localStorage.getItem("simulab.theme") || ""; } catch (e) { A.theme = ""; }
+  function applyTheme() {
+    if (A.theme) document.documentElement.setAttribute("data-theme", A.theme);
+    else document.documentElement.removeAttribute("data-theme");
+    A.deskColor = getComputedStyle(document.documentElement).getPropertyValue("--desk").trim() || "#9aa1ab";
+    A.redraw();
+  }
+  A.setTheme = function (th) {
+    A.theme = th;
+    try { localStorage.setItem("simulab.theme", th); } catch (e) { /* private mode */ }
+    applyTheme(); A.refreshAll();
+  };
+  if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+  applyTheme();
+
+  function renderLegend() {
+    var lg = document.getElementById("legend");
+    if (!lg) return;
+    lg.hidden = !prefs.legend;
+    if (lg.childNodes.length || !prefs.legend) return;
+    var P = SL.POT;
+    [["L1", P.L1], ["L2", P.L2], ["L3", P.L3], ["N", P.N], ["PE", P.PE], ["+", P.POS], ["−", P.NEG]].forEach(function (x) {
+      var i = el("i"); i.style.background = SL.potColor(x[1]);
+      lg.appendChild(el("span", {}, [i, document.createTextNode(x[0])]));
+    });
+  }
+
+  // ================================================================ side properties card
+  var propsFor = null, propsSig = "";
+  function selectedComp() {
+    var t = A.tab();
+    if (t.mode !== "edit" || A.sel.size !== 1) return null;
+    var id = A.sel.values().next().value;
+    return t.doc.comps.find(function (c) { return c.id === id; }) || null;
+  }
+  function renderProps() {
+    var box = document.getElementById("props");
+    if (!box) return;
+    var c = prefs.props ? selectedComp() : null;
+    if (!c) { box.hidden = true; propsFor = null; return; }
+    var sig = c.id + JSON.stringify(c);
+    box.hidden = false;
+    if (propsFor === c.id && propsSig === sig) return;
+    if (box.contains(document.activeElement) && propsFor === c.id) return; // do not rebuild while typing
+    propsFor = c.id; propsSig = sig;
+    var K = SL.KINDS[c.kind];
+    box.innerHTML = "";
+    box.appendChild(el("h3", { text: c.name || K.label }));
+    box.appendChild(el("div", { class: "k", text: K.label }));
+    function field(label, key, type, conv) {
+      var inp = el("input", { type: type || "text" }); inp.value = c[key] == null ? "" : c[key];
+      inp.addEventListener("change", function () {
+        A.checkpoint(); c[key] = conv ? conv(inp.value) : inp.value; A.changed(); propsSig = ""; renderProps();
+      });
+      box.appendChild(el("label", { text: label })); box.appendChild(inp);
+    }
+    var num = function (v) { var n = parseFloat(String(v).replace(",", ".")); return isFinite(n) && n >= 0 ? n : 0; };
+    field("Nom", "name", "text", function (v) { return v.trim(); });
+    field("Funció", "func");
+    if (K.timer || K.ramp) field(K.ramp ? "Temps de rampa (× multiplicador)" : c.kind === "TimeSwitch" ? "Temps ON (× multiplicador)" : "Temps (× multiplicador)", "time_base", "number", num);
+    if (c.kind === "TimeSwitch") field("Temps OFF (× multiplicador)", "off_base", "number", num);
+    if (K.timer || K.ramp) {
+      var sel = el("select");
+      [[0.1, "× 0,1 s"], [1, "× 1 s"], [10, "× 10 s"], [60, "× 60 s"]].forEach(function (o) {
+        var op = el("option", { text: o[1] }); op.value = o[0]; if (+c.time_mult === o[0]) op.selected = true; sel.appendChild(op);
+      });
+      sel.addEventListener("change", function () { A.checkpoint(); c.time_mult = +sel.value; A.changed(); });
+      box.appendChild(el("label", { text: "Multiplicador" })); box.appendChild(sel);
+    }
+    if (K.counter) field("Preselecció (polsos)", "count_preset", "number", function (v) { return Math.max(1, parseInt(v, 10) || 1); });
+    if (c.kind === "ThermalRelay3") {
+      var cb = el("input", { type: "checkbox" }); cb.checked = !!c.auto_reset;
+      cb.addEventListener("change", function () { A.checkpoint(); c.auto_reset = cb.checked; A.changed(); });
+      box.appendChild(el("label", { class: "chk" }, [cb, document.createTextNode("Rearmament automàtic")]));
+    }
+    box.appendChild(el("button", { text: "Més propietats…", on: { click: function () { A.openProps(c.id); } } }));
+  }
+
+  // ================================================================ minimap
+  var lastMini = 0;
+  function renderMinimap(force) {
+    var mm = document.getElementById("minimap"), t = A.tab();
+    if (!mm) return;
+    mm.hidden = !prefs.minimap;
+    if (mm.hidden) return;
+    var now = Date.now();
+    if (!force && now - lastMini < 300) return;
+    lastMini = now;
+    var dpr = window.devicePixelRatio || 1, W = mm.clientWidth, H = mm.clientHeight, ds = SL.docSize(t.doc);
+    mm.width = Math.round(W * dpr); mm.height = Math.round(H * dpr);
+    var g = mm.getContext("2d"), z = Math.min((W - 8) / ds.w, (H - 8) / ds.h);
+    var view = { zoom: z, panX: (W - ds.w * z) / 2, panY: (H - ds.h * z) / 2 };
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = A.deskColor || "#9aa1ab"; g.fillRect(0, 0, W, H);
+    SL.drawDoc(new SL.Renderer(g, view), t, { grid: false, sel: new Set(), dx: 0, dy: 0, mini: true });
+    // visible area of the main view
+    var cr = A.canvasRect(), v = t.view;
+    var x0 = (-v.panX / v.zoom) * z + view.panX, y0 = (-v.panY / v.zoom) * z + view.panY;
+    g.strokeStyle = "#2563eb"; g.lineWidth = 1.5; g.setLineDash([]);
+    g.fillStyle = "rgba(37,99,235,.12)";
+    g.fillRect(x0, y0, cr.w / v.zoom * z, cr.h / v.zoom * z);
+    g.strokeRect(x0, y0, cr.w / v.zoom * z, cr.h / v.zoom * z);
+    mm.view = view;
+  }
+  function miniGo(e) {
+    var mm = document.getElementById("minimap"), r = mm.getBoundingClientRect(), view = mm.view, t = A.tab(), cr = A.canvasRect();
+    if (!view) return;
+    var wx = (e.clientX - r.left - view.panX) / view.zoom, wy = (e.clientY - r.top - view.panY) / view.zoom;
+    t.view.panX = cr.w / 2 - wx * t.view.zoom; t.view.panY = cr.h / 2 - wy * t.view.zoom;
+    A.redraw(); renderMinimap(true);
+  }
+  (function () {
+    var mm = document.getElementById("minimap"), down = false;
+    if (!mm) return;
+    mm.addEventListener("pointerdown", function (e) { down = true; mm.setPointerCapture(e.pointerId); miniGo(e); });
+    mm.addEventListener("pointermove", function (e) { if (down) miniGo(e); });
+    mm.addEventListener("pointerup", function () { down = false; });
+  })();
+
+  A.onStatus = function () { renderLegend(); renderProps(); renderMinimap(); };
+
+  /** Connection list: every numbered conductor (net) with the terminals it joins. */
+  A.exportNets = function () {
+    var doc = A.tab().doc, topo = SL.topoFor(doc), info = SL.wireInfo(doc), byRoot = {};
+    info.nets.forEach(function (n) { byRoot[n.root] = []; });
+    doc.comps.forEach(function (c) {
+      var labels = SL.baseSymbol(c.kind).tlabels;
+      SL.terminals(c).forEach(function (p, i) {
+        var idx = topo.idx[p[0] + "," + p[1]];
+        if (idx == null) return;
+        var list = byRoot[topo.base[idx]];
+        if (list) list.push((c.name || SL.KINDS[c.kind].label) + ":" + (labels[i] || i + 1));
+      });
+    });
+    var csv = "Conductor;Potència;Borns connectats\n" + info.nets.map(function (n) {
+      var anyW = doc.wires.find(function (w) { return info.num[w.id] === n.num; });
+      return n.num + ";" + (anyW && info.power[anyW.id] ? "sí" : "no") + ";" + byRoot[n.root].join(" · ");
+    }).join("\n");
+    A.download(A.tab().title + "-connexions.csv", new Blob(["﻿" + csv], { type: "text/csv" }));
   };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);

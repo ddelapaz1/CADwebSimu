@@ -30,10 +30,49 @@
       var m = sim.wirePot && sim.wirePot[w.id] != null ? sim.wirePot[w.id] : sim.pot[key(w.a)];
       return SL.potColor(m) || "#000";
     }
+    var winfo = SL.wireInfo(doc);
+    // after a short circuit or an earth fault, the conductors where the potentials met blink in red
+    var fw = !sim && t.faultWires && opts.time != null && opts.time < t.faultUntil ? t.faultWires : null;
+    if (fw) A.needsDraw = true;
     doc.wires.forEach(function (w) {
       var col = sel.has(w.id) ? C.SEL : wireColor(w);
-      r.wire(shifted(w, function (o) { o.a = [o.a[0] + dx, o.a[1] + dy]; o.b = [o.b[0] + dx, o.b[1] + dy]; return o; }), col);
+      // power wiring thicker than control wiring, as on real schematics
+      r.wire(shifted(w, function (o) { o.a = [o.a[0] + dx, o.a[1] + dy]; o.b = [o.b[0] + dx, o.b[1] + dy]; return o; }), col, winfo.power[w.id] ? 2.2 : 1.3);
     });
+    if (fw && Math.sin(opts.time * 10) > -0.3) {
+      var rgf = r.g;
+      rgf.strokeStyle = "rgba(220,38,38,0.6)"; rgf.lineWidth = Math.max(6, 4 * r.v.zoom); rgf.setLineDash([]); rgf.lineCap = "round";
+      doc.wires.forEach(function (w) {
+        if (!fw.has(w.id)) return;
+        var p0 = r.s(w.a), p1 = r.s(w.b);
+        rgf.beginPath(); rgf.moveTo(p0[0], p0[1]); rgf.lineTo(p1[0], p1[1]); rgf.stroke();
+      });
+    }
+    // current animation: dashes that run along the conductors carrying current
+    if (sim && !hideV && !opts.mini && opts.time != null && A.prefOn && A.prefOn("flow")) {
+      var fg = r.g, off = -(opts.time * 26) % 18;
+      fg.save && fg.save();
+      fg.lineCap = "round";
+      sim.currentFlow(doc).forEach(function (f) {
+        var p0 = r.s(f.from), p1 = r.s(f.to);
+        fg.strokeStyle = "rgba(255,255,255,0.9)";
+        fg.lineWidth = Math.max(1.2, (winfo.power[f.w] ? 1.2 : 0.8) * r.v.zoom);
+        fg.setLineDash([Math.max(2, 3 * r.v.zoom), Math.max(4, 6 * r.v.zoom)]);
+        fg.lineDashOffset = off * r.v.zoom;
+        fg.beginPath(); fg.moveTo(p0[0], p0[1]); fg.lineTo(p1[0], p1[1]); fg.stroke();
+      });
+      fg.setLineDash([]); fg.lineDashOffset = 0;
+      fg.restore && fg.restore();
+    }
+    if (doc.page.wire_numbers && !opts.mini) {
+      var fsn = Math.max(4, 7.5 * r.v.zoom);
+      if (fsn >= 4.5) doc.wires.forEach(function (w) {
+        var nn = winfo.label[w.id];
+        if (!nn) return;
+        var hzw = w.a[1] === w.b[1], m = r.s([(w.a[0] + w.b[0]) / 2, (w.a[1] + w.b[1]) / 2]);
+        r.text(hzw ? [m[0], m[1] - 2] : [m[0] - 3, m[1]], String(nn), fsn, "rgb(120,60,0)", hzw ? "center" : "right", hzw ? "bottom" : "middle");
+      });
+    }
     SL.junctionPoints(doc).forEach(function (p) {
       r.dot(p, ptColor(p));
     });
@@ -79,7 +118,7 @@
             else if (st.motor || st.spd > 0.01) {
               var pct = Math.round((st.spd || 0) / SL.motorLevel(c, st) * 100);
               var parts = [];
-              if (pct < 99) parts.push(Math.min(100, pct) + " %");
+              parts.push(Math.min(100, pct) + " %");
               if (c.kind === "Motor3WR" && st.steps) parts.push("R: " + st.steps + (st.steps === 1 ? " graó" : " graons"));
               if (c.kind === "Motor3Dahl") parts.push(st.conn === 2 ? "alta" : "baixa");
               extra = parts.join(" · ") || null;
@@ -115,10 +154,51 @@
         extra = to.length ? "→ " + to.join(", ") : "(sense parella)";
         if (sim) color = SL.potColor(sim.pot[key(SL.terminals(c)[0])]) || C.GRAY;
       }
+      if (sim && !opts.mini) {
+        var stv = sim.s(c.id);
+        if ((c.kind === "Lamp" || c.kind === "LampFlash") && vis.lamp) {
+          var lc = SL.LAMP_COLORS[c.color] || SL.LAMP_COLORS.Verde;
+          vis.halo = { c: [0, 30], r: 30, color: "rgba(" + lc[0] + "," + lc[1] + "," + lc[2] + ",0.55)" };
+        } else if (K.coil && stv.on && SL.baseSymbol(c.kind).terms.length === 2) {
+          vis.halo = { c: [0, 30], r: 24, color: "rgba(255,70,70,0.35)" };
+        }
+        // contacts move over about 0.12 s instead of jumping
+        if (opts.time != null && (K.role === "Contact" || K.role === "Poles" || K.role === "Manual" || K.role === "Actuator")) {
+          var an = A.anim || (A.anim = {}), target = vis.closed ? 1 : 0, cur = an[c.id];
+          if (!cur) cur = an[c.id] = { v: target, t: opts.time };
+          var step = Math.min(1, (opts.time - cur.t) / 0.12);
+          cur.v = cur.v + (target - cur.v) * step; cur.t = opts.time;
+          if (Math.abs(cur.v - target) < 0.02) cur.v = target;
+          vis.closedT = cur.v;
+          if (cur.v !== target) A.needsDraw = true;
+        }
+      }
       var isSel = sel.has(c.id), cc = c;
       if (isSel && (dx || dy)) { cc = Object.assign({}, c); cc.x += dx; cc.y += dy; }
+      var hov = !sim && opts.hover === c.id && !isSel;
+      if (hov) {
+        // soft highlight under the element the pointer is on
+        r.g.fillStyle = "rgba(37,99,235,0.07)";
+        var hb = SL.compRect(cc), h0 = r.s([hb.x0, hb.y0]), h1 = r.s([hb.x1, hb.y1]);
+        SL.roundRect(r.g, h0[0] - 5, h0[1] - 5, h1[0] - h0[0] + 10, h1[1] - h0[1] + 10, 6); r.g.fill();
+      }
       var box = r.comp(cc, vis, isSel ? C.SEL : color, doc.page.show_terminals, extra);
-      if (isSel) { r.g.strokeStyle = C.SEL; r.g.lineWidth = 1; r.g.setLineDash([]); r.g.strokeRect(box.x0 - 3, box.y0 - 3, box.x1 - box.x0 + 6, box.y1 - box.y0 + 6); }
+      // a protection that has just tripped flashes for 3 s
+      if (sim && sim.flash && sim.flash[c.id] != null && sim.time - sim.flash[c.id] < 3 && opts.time != null) {
+        var on = Math.sin(opts.time * 12) > 0;
+        if (on) {
+          r.g.strokeStyle = "rgb(220,38,38)"; r.g.lineWidth = 3; r.g.setLineDash([]);
+          SL.roundRect(r.g, box.x0 - 6, box.y0 - 6, box.x1 - box.x0 + 12, box.y1 - box.y0 + 12, 7); r.g.stroke();
+        }
+      }
+      if (isSel) {
+        var rg2 = r.g;
+        rg2.save && rg2.save();
+        rg2.strokeStyle = "rgba(37,99,235,0.9)"; rg2.lineWidth = 1.5; rg2.setLineDash([]);
+        if ("shadowBlur" in rg2) { rg2.shadowColor = "rgba(37,99,235,0.45)"; rg2.shadowBlur = 8; }
+        SL.roundRect(rg2, box.x0 - 5, box.y0 - 5, box.x1 - box.x0 + 10, box.y1 - box.y0 + 10, 6); rg2.stroke();
+        rg2.restore && rg2.restore();
+      }
     });
     // cross references under each coil: its contacts and the column where they are
     if (doc.page.references && doc.page.xref !== false) {
@@ -354,6 +434,14 @@
     return net;
   }
 
+  /** "born" / "conductor" when a point lands on a terminal or a conductor (for the snap marker). */
+  function snapTarget(p) {
+    var d = A.tab().doc;
+    if (d.comps.some(function (c) { return SL.terminals(c).some(function (q) { return q[0] === p[0] && q[1] === p[1]; }); })) return "born";
+    if (d.wires.some(function (w) { return (w.a[0] === p[0] && w.a[1] === p[1]) || (w.b[0] === p[0] && w.b[1] === p[1]) || SL.wireInterior(w, p); })) return "conductor";
+    return null;
+  }
+
   function onMove(e) {
     if (rcHold && Math.hypot(e.clientX - rcHold.x, e.clientY - rcHold.y) > 8) {
       clearRcHold();
@@ -374,6 +462,12 @@
     else cv.style.cursor = A.tool.t === "select" ? "default" : "crosshair";
     updateProbe(e, m.w);
     A.hoverNet = A.tab().mode === "edit" && !dr && (A.tool.t === "select" || A.tool.t === "wire") ? netAt(m.w) : null;
+    var hc = null;
+    if (A.tab().mode === "edit" && !dr && A.tool.t === "select") {
+      var dd = A.tab().doc;
+      for (var hi = dd.comps.length - 1; hi >= 0; hi--) if (inRect(SL.compRect(dd.comps[hi]), m.w, 3)) { hc = dd.comps[hi].id; break; }
+    }
+    A.hoverComp = hc;
     A.updateStatus();
     A.redraw();
   }
@@ -421,6 +515,7 @@
       }
     }
     A.redraw();
+    A.updateStatus();
   }
 
   function onDbl(e) {
@@ -451,10 +546,10 @@
       t.view.zoom = Math.max(0.3, Math.min(1.2, (w - 40) / ps.w)); t.view.panX = 20; t.view.panY = 16;
     }
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = "rgb(128,128,128)"; g.fillRect(0, 0, w, h);
+    g.fillStyle = A.deskColor || "rgb(128,128,128)"; g.fillRect(0, 0, w, h);
     var r = new SL.Renderer(g, t.view), dr = A.drag, dx = 0, dy = 0;
     if (dr && dr.t === "move") { dx = SL.snap(dr.b[0] - dr.a[0]); dy = SL.snap(dr.b[1] - dr.a[1]); }
-    SL.drawDoc(r, t, { grid: A.grid, sel: A.sel, dx: dx, dy: dy, net: A.hoverNet });
+    SL.drawDoc(r, t, { grid: A.grid, sel: A.sel, dx: dx, dy: dy, net: A.hoverNet, hover: A.hoverComp, time: performance.now() / 1000 });
     // overlays
     if (t.mode === "edit" && A.hover) {
       var sw = [SL.snap(A.hover[0]), SL.snap(A.hover[1])];
@@ -463,14 +558,24 @@
         r.comp({ id: 0, kind: A.tool.kind, x: sw[0], y: sw[1], rot: A.placeRot, mirror: A.placeMirror, name: "" }, {}, "rgb(0,0,200)", false, null);
         g.globalAlpha = 1;
       } else if (A.tool.t === "wire") {
-        var s = r.s(sw);
-        g.strokeStyle = "rgb(0,0,200)"; g.lineWidth = 1; g.setLineDash([]);
-        g.beginPath(); g.arc(s[0], s[1], 4, 0, 2 * Math.PI); g.stroke();
+        var s = r.s(sw), snapOn = snapTarget(sw);
         if (A.wireFrom) {
+          // preview of the route the conductor will take (90° turns)
           var a = A.wireFrom, mid = SL.chooseRouteMid(t.doc, a, sw);
           var p0 = r.s(a), p1 = r.s(mid), p2 = r.s(sw);
-          g.setLineDash([5, 3]); g.lineWidth = 1.5;
-          g.beginPath(); g.moveTo(p0[0], p0[1]); g.lineTo(p1[0], p1[1]); g.lineTo(p2[0], p2[1]); g.stroke(); g.setLineDash([]);
+          g.strokeStyle = "rgba(37,99,235,0.75)"; g.lineWidth = Math.max(1.5, 1.3 * t.view.zoom); g.setLineDash([]);
+          g.beginPath(); g.moveTo(p0[0], p0[1]); g.lineTo(p1[0], p1[1]); g.lineTo(p2[0], p2[1]); g.stroke();
+          g.fillStyle = "rgb(37,99,235)"; g.beginPath(); g.arc(p0[0], p0[1], 3, 0, 2 * Math.PI); g.fill();
+        }
+        // snap point: green when it lands on a terminal or a conductor
+        g.setLineDash([]);
+        if (snapOn) {
+          g.fillStyle = "rgba(22,163,74,0.25)"; g.strokeStyle = "rgb(22,163,74)"; g.lineWidth = 2;
+          g.beginPath(); g.arc(s[0], s[1], 7, 0, 2 * Math.PI); g.fill(); g.stroke();
+          r.text([s[0] + 10, s[1] - 10], snapOn, 11, "rgb(22,120,60)", "left");
+        } else {
+          g.strokeStyle = "rgb(37,99,235)"; g.lineWidth = 1.2;
+          g.beginPath(); g.arc(s[0], s[1], 4, 0, 2 * Math.PI); g.stroke();
         }
       } else if (A.tool.t === "junction") {
         var sj = r.s(sw);

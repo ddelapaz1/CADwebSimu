@@ -38,6 +38,10 @@ Editor i simulador d'esquemes elèctrics de comandament i potència que funciona
   exportació vectorial (SVG i PDF des d'Imprimeix) i llista de materials en CSV.
 - So per al timbre, el brunzidor, la sirena i la botzina (es pot silenciar a Mode).
 
+- Interfície moderna amb mode fosc (Visualitza › Tema), franja de color segons el mode, panell
+  de propietats lateral, minimapa, llegenda de colors i animació del corrent pels conductors.
+- Conductors de potència més gruixuts, numeració de conductors i llista de connexions (CSV).
+
 ## Exemples
 - `?ejemplo=1` arrencada directa d'un motor
 - `?ejemplo=2` arrencada estrella-triangle (afegiu `&simular=1` per veure'l en marxa)

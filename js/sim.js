@@ -382,25 +382,22 @@
 
   Sim.prototype.closedNow = function (doc, c) { return this.closed(c, this.drivers(doc)); };
 
-  Sim.prototype.solve = function (doc, topo) {
-    var n = topo.pts.length, d = new Dsu(0), self = this;
-    d.p = topo.base.slice();
-    var drivers = this.drivers(doc);
-    doc.comps.forEach(function (c) {
-      var K = SL.KINDS[c.kind];
-      var t = topo.terms[c.id];
+  /** Pairs of terminal indexes an element joins right now (closed contacts, poles, passive parts...). */
+  Sim.prototype.conductPairs = function (doc, c, drivers) {
+    var self = this, out = [], K = SL.KINDS[c.kind], t = SL.baseSymbol(c.kind).terms;
+    (function () {
       if (c.kind === "SsrDC" || c.kind === "SsrAC") {
-        if (self.s(c.id).on && t.length >= 2) d.union(t[0], t[1]);
+        if (self.s(c.id).on && t.length >= 2) out.push([0, 1]);
         return;
       }
       if (c.kind === "CoilContactNO") {
-        if (self.s(c.id).on && t.length >= 4) d.union(t[2], t[3]);
+        if (self.s(c.id).on && t.length >= 4) out.push([2, 3]);
         return;
       }
       if (c.kind === "CoilContactCO") {
         var ccOn = self.s(c.id).on;
-        if (!ccOn && t.length >= 4) d.union(t[2], t[3]);
-        if (ccOn && t.length >= 5) d.union(t[2], t[4]);
+        if (!ccOn && t.length >= 4) out.push([2, 3]);
+        if (ccOn && t.length >= 5) out.push([2, 4]);
         return;
       }
       if (["Passive", "Manual", "Poles", "Contact", "Actuator"].indexOf(K.role) < 0) return;
@@ -408,37 +405,48 @@
       var isClosed = self.closed(c, drivers);
       if (c.kind === "CrossSw") {
         if (t.length >= 4) {
-          if (isClosed) { d.union(t[0], t[2]); d.union(t[1], t[3]); }
-          else { d.union(t[0], t[3]); d.union(t[1], t[2]); }
+          if (isClosed) { out.push([0, 2]); out.push([1, 3]); }
+          else { out.push([0, 3]); out.push([1, 2]); }
         }
         return;
       }
       if (c.kind === "Sel102") {
         var pos102 = self.s(c.id).pos || (isClosed ? 1 : 0);
-        if (pos102 === 1 && t.length >= 2) d.union(t[0], t[1]);
-        else if (pos102 === 2 && t.length >= 3) d.union(t[0], t[2]);
+        if (pos102 === 1 && t.length >= 2) out.push([0, 1]);
+        else if (pos102 === 2 && t.length >= 3) out.push([0, 2]);
         return;
       }
       if (c.kind === "Sel123") {
         var pos123 = self.s(c.id).pos || (isClosed ? 1 : 0);
-        if (pos123 === 0 && t.length >= 2) d.union(t[0], t[1]);
-        else if (pos123 === 1 && t.length >= 3) d.union(t[0], t[2]);
-        else if (pos123 === 2 && t.length >= 4) d.union(t[0], t[3]);
+        if (pos123 === 0 && t.length >= 2) out.push([0, 1]);
+        else if (pos123 === 1 && t.length >= 3) out.push([0, 2]);
+        else if (pos123 === 2 && t.length >= 4) out.push([0, 3]);
         return;
       }
       if (c.kind.slice(-4) === "NONC") {
-        if (!isClosed && t.length >= 2) d.union(t[0], t[1]);
-        if (isClosed && t.length >= 4) d.union(t[2], t[3]);
+        if (!isClosed && t.length >= 2) out.push([0, 1]);
+        if (isClosed && t.length >= 4) out.push([2, 3]);
         return;
       }
       if (c.kind.slice(-2) === "CO") {
-        if (!isClosed && t.length >= 2) d.union(t[0], t[1]);
-        if (isClosed && t.length >= 3) d.union(t[0], t[2]);
+        if (!isClosed && t.length >= 2) out.push([0, 1]);
+        if (isClosed && t.length >= 3) out.push([0, 2]);
         return;
       }
       if (!isClosed) return;
       var np = K.poles > 0 ? K.poles : 1;
-      for (var i = 0; i < np; i++) if (2 * i + 1 < t.length) d.union(t[2 * i], t[2 * i + 1]);
+      for (var i = 0; i < np; i++) if (2 * i + 1 < t.length) out.push([2 * i, 2 * i + 1]);
+    })();
+    return out;
+  };
+
+  Sim.prototype.solve = function (doc, topo) {
+    var n = topo.pts.length, d = new Dsu(0), self = this;
+    d.p = topo.base.slice();
+    var drivers = this.drivers(doc);
+    doc.comps.forEach(function (c) {
+      var t = topo.terms[c.id];
+      self.conductPairs(doc, c, drivers).forEach(function (pr) { d.union(t[pr[0]], t[pr[1]]); });
     });
     var mask = new Array(n).fill(0);
     doc.comps.forEach(function (c) {
@@ -793,6 +801,7 @@
       st.heat = rate ? (st.heat || 0) + dt * rate : Math.max(0, (st.heat || 0) - dt / SL.THERMAL_COOL);
       if (st.heat >= 1) {
         self.setActuator(doc, c.id, true);
+        (self.flash = self.flash || {})[c.id] = self.time;
         self.note((c.name || "Relé tèrmic") + ": ha disparat el relé tèrmic (" + reason + ")");
       }
     });
@@ -850,6 +859,7 @@
     });
     if (!best) return false;
     var c = best.c, st = this.s(c.id), why = fault === "Short" ? "curtcircuit" : "derivació a terra";
+    (this.flash = this.flash || {})[c.id] = this.time; // the tripped device flashes for a moment
     if (isFuse(c.kind)) {
       st.blown = true;
       this.note((c.name || "Fusible") + ": s'ha fos el fusible (" + why + "). Feu-hi clic per canviar-lo.");
@@ -929,6 +939,90 @@
       if (Math.hypot(a[0] + abx * t - w[0], a[1] + aby * t - w[1]) <= tol) return { m: this.wirePot[x.id] || 0, where: "conductor" };
     }
     return null;
+  };
+
+
+  // ---------------------------------------------------------------- current paths (animation)
+  /** Wire segments of the drawing, split at every joined point (built once per topology). */
+  var segCache = typeof WeakMap !== "undefined" ? new WeakMap() : null;
+  function wireSegments(doc, topo) {
+    var hit = segCache && segCache.get(topo);
+    if (hit) return hit;
+    var segs = [];
+    doc.wires.forEach(function (w) {
+      var wn = topo.wireNode[w.id];
+      if (wn == null) return;
+      var root = topo.base[wn], pts = [w.a, w.b];
+      topo.coordList.forEach(function (p) {
+        if (SL.wireInterior(w, p) && topo.base[topo.idx[key(p)]] === root) pts.push(p);
+      });
+      var hz = w.a[1] === w.b[1];
+      pts.sort(function (p, q) { return hz ? p[0] - q[0] : p[1] - q[1]; });
+      for (var i = 0; i + 1 < pts.length; i++) {
+        if (pts[i][0] === pts[i + 1][0] && pts[i][1] === pts[i + 1][1]) continue;
+        segs.push({ w: w.id, a: pts[i], b: pts[i + 1], ka: key(pts[i]), kb: key(pts[i + 1]) });
+      }
+    });
+    if (segCache) segCache.set(topo, segs);
+    return segs;
+  }
+
+  /**
+   * Conductor stretches that carry current right now, each oriented in the
+   * direction of the current: from the source to the load on phases and "+",
+   * back from the load to the source on N and "−". Found by tracing, for every
+   * energised load, the shortest path to the source through conductors and
+   * closed elements.
+   */
+  Sim.prototype.currentFlow = function (doc) {
+    var self = this, topo = SL.topoFor(doc), drivers = this.drivers(doc);
+    var loads = [];
+    doc.comps.forEach(function (c) {
+      var K = SL.KINDS[c.kind], st = self.s(c.id);
+      if (K.role === "Load" && (st.energized || st.motor)) loads.push(c);
+    });
+    var sig = loads.map(function (c) { return c.id; }).join(",") + "|" + Object.keys(this.pot).map(function (k) { return self.pot[k]; }).join("");
+    if (this._flow && this._flow.sig === sig) return this._flow.segs;
+    var adj = {};
+    function link(ka, kb, seg) { (adj[ka] = adj[ka] || []).push({ to: kb, seg: seg }); (adj[kb] = adj[kb] || []).push({ to: ka, seg: seg }); }
+    wireSegments(doc, topo).forEach(function (sg) { link(sg.ka, sg.kb, sg); });
+    var sources = {};
+    doc.comps.forEach(function (c) {
+      var K = SL.KINDS[c.kind], ts = SL.terminals(c);
+      if (K.role === "Feed") ts.forEach(function (p) { sources[key(p)] = true; });
+      else if (K.role === "Converter" || K.role === "Logic") ts.forEach(function (p) { sources[key(p)] = true; });
+      else self.conductPairs(doc, c, drivers).forEach(function (pr) { link(key(ts[pr[0]]), key(ts[pr[1]]), null); });
+    });
+    var out = [], used = {};
+    loads.forEach(function (c) {
+      var pe = peTerminal(c.kind);
+      SL.terminals(c).forEach(function (p, ti) {
+        var k0 = key(p), m = self.pot[k0] || 0, bit = single(m);
+        if (ti === pe || !bit || bit === P.PE) return;
+        var supply = bit !== P.N && bit !== P.NEG;
+        // breadth-first search towards a source with the same potential
+        var prev = {}, q = [k0], seen = {}, found = null;
+        seen[k0] = true;
+        while (q.length && !found) {
+          var cur = q.shift();
+          if (sources[cur] && cur !== k0) { found = cur; break; }
+          (adj[cur] || []).forEach(function (e) {
+            if (seen[e.to] || single(self.pot[e.to] || 0) !== bit) return;
+            seen[e.to] = true; prev[e.to] = { from: cur, seg: e.seg }; q.push(e.to);
+          });
+        }
+        for (var k = found; k && prev[k]; k = prev[k].from) {
+          var e = prev[k], sg = e.seg;
+          if (!sg || used[sg.ka + "|" + sg.kb]) continue;
+          used[sg.ka + "|" + sg.kb] = true;
+          // e.from is nearer the load, k nearer the source
+          var towardsLoad = sg.ka === k ? [sg.a, sg.b] : [sg.b, sg.a];
+          out.push({ w: sg.w, from: supply ? towardsLoad[0] : towardsLoad[1], to: supply ? towardsLoad[1] : towardsLoad[0], pot: bit });
+        }
+      });
+    });
+    this._flow = { sig: sig, segs: out };
+    return out;
   };
 
   SL.Sim = Sim;

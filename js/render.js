@@ -57,15 +57,19 @@
     var a = this.s([0, 0]), b = this.s([W, H]);
     g.fillStyle = "rgb(70,70,70)"; g.fillRect(a[0] + 4, a[1] + 4, b[0] - a[0], b[1] - a[1]);
     g.fillStyle = "#fff"; g.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
-    if (grid && SL.GRID * this.v.zoom >= 5) {
-      g.fillStyle = "rgb(185,185,185)";
-      var cw = g.canvas.width, ch = g.canvas.height;
-      for (var y = 0; y <= H; y += SL.GRID) {
+    // adaptive grid: fine dots when there is room, a stronger dot every 5 cells
+    var cell = SL.GRID * this.v.zoom;
+    if (grid && cell * 5 >= 9) {
+      var cw = g.canvas.width, ch = g.canvas.height, fine = cell >= 6, step = fine ? SL.GRID : SL.GRID * 5;
+      for (var y = 0; y <= H; y += step) {
         var sy = this.s([0, y])[1];
         if (sy < -2 || sy > ch + 2) continue;
-        for (var x = 0; x <= W; x += SL.GRID) {
+        for (var x = 0; x <= W; x += step) {
           var sx = this.s([x, 0])[0];
-          if (sx >= 0 && sx <= cw) g.fillRect(sx - 0.5, sy - 0.5, 1, 1);
+          if (sx < 0 || sx > cw) continue;
+          var major = (x / SL.GRID) % 5 === 0 && (y / SL.GRID) % 5 === 0;
+          if (major) { g.fillStyle = "rgb(150,156,166)"; g.fillRect(sx - 0.9, sy - 0.9, 1.8, 1.8); }
+          else { g.fillStyle = "rgb(200,204,210)"; g.fillRect(sx - 0.5, sy - 0.5, 1, 1); }
         }
       }
     }
@@ -132,9 +136,9 @@
     return { x0: t.x, y0: t.y, x1: t.x + w, y1: t.y + t.size * 1.2 };
   };
 
-  R.prototype.wire = function (w, color) {
+  R.prototype.wire = function (w, color, width) {
     var g = this.g, a = this.s(w.a), b = this.s(w.b);
-    g.strokeStyle = color; g.lineWidth = this.w(1.3);
+    g.strokeStyle = color; g.lineWidth = this.w(width || 1.3);
     g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
   };
 
@@ -149,6 +153,12 @@
     function tr(p) { var q = SL.xform(p, c.rot, c.mirror); return self.s([q[0] + c.x, q[1] + c.y]); }
     var lw = this.w(1.2);
     g.lineJoin = "round"; g.lineCap = "round";
+    if (vis.halo && g.createRadialGradient) {
+      // glow of a lit pilot light or an energised coil
+      var hc = tr(vis.halo.c), hr = vis.halo.r * this.v.zoom, grd = g.createRadialGradient(hc[0], hc[1], hr * 0.2, hc[0], hc[1], hr);
+      grd.addColorStop(0, vis.halo.color); grd.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = grd; g.beginPath(); g.arc(hc[0], hc[1], hr, 0, 2 * Math.PI); g.fill();
+    }
     sym.prims.forEach(function (pr) {
       var col = pr.color || color, a, b, pts;
       g.strokeStyle = col; g.lineWidth = lw; g.setLineDash([]);
@@ -250,6 +260,66 @@
     // power poles first, then contacts in reading order
     out.sort(function (a, b) { return (b.poles - a.poles) || (a.x - b.x) || (a.y - b.y); });
     return out.map(function (o) { return o.text; });
+  };
+
+  /** Rounded rectangle path in screen coordinates. */
+  SL.roundRect = function (g, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    g.beginPath(); g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.arc(x + w - r, y + r, r, -Math.PI / 2, 0);
+    g.lineTo(x + w, y + h - r); g.arc(x + w - r, y + h - r, r, 0, Math.PI / 2);
+    g.lineTo(x + r, y + h); g.arc(x + r, y + h - r, r, Math.PI / 2, Math.PI);
+    g.lineTo(x, y + r); g.arc(x + r, y + r, r, Math.PI, 1.5 * Math.PI); g.closePath();
+  };
+
+  // Elements whose conductors are power wiring (drawn thicker): contactor poles, motors,
+  // three-phase feeds and multi-pole protections.
+  function isPowerKind(kind) {
+    var K = SL.KINDS[kind];
+    return K.role === "Poles" || K.motor || /^FeedL123/.test(kind) ||
+      ((K.role === "Manual" || K.role === "Passive" || K.role === "Converter") && K.poles >= 3) || /3$/.test(kind) && /^(Transformer|PowerSupply|Resistor|AutoTrans)/.test(kind);
+  }
+  SL.isPowerKind = isPowerKind;
+
+  /**
+   * Per conductor: power or control, and its net number (nets numbered in
+   * reading order: left to right, then top to bottom). Cached per topology.
+   */
+  var classCache = typeof WeakMap !== "undefined" ? new WeakMap() : null;
+  SL.wireInfo = function (doc) {
+    var topo = SL.topoFor(doc), hit = classCache && classCache.get(topo);
+    if (hit) return hit;
+    var key = function (p) { return p[0] + "," + p[1]; }, powerRoots = {}, nets = {}, order = [];
+    doc.comps.forEach(function (c) {
+      if (!isPowerKind(c.kind)) return;
+      SL.terminals(c).forEach(function (p) { var i = topo.idx[key(p)]; if (i != null) powerRoots[topo.base[i]] = true; });
+    });
+    doc.wires.forEach(function (w) {
+      var n = topo.wireNode[w.id];
+      if (n == null) return;
+      var root = topo.base[n];
+      if (!nets[root]) { nets[root] = { wires: [], x: Infinity, y: Infinity }; order.push(root); }
+      var net = nets[root];
+      net.wires.push(w);
+      net.x = Math.min(net.x, w.a[0], w.b[0]); net.y = Math.min(net.y, w.a[1], w.b[1]);
+    });
+    order.sort(function (a, b) {
+      var A = nets[a], B = nets[b], sa = SL.sheetOf(doc, [A.x, A.y]), sb = SL.sheetOf(doc, [B.x, B.y]);
+      return (sa - sb) || (A.x - B.x) || (A.y - B.y);
+    });
+    var info = { power: {}, num: {}, label: {}, nets: [] };
+    order.forEach(function (root, i) {
+      var net = nets[root], longest = null, best = -1;
+      net.wires.forEach(function (w) {
+        info.num[w.id] = i + 1;
+        if (powerRoots[root]) info.power[w.id] = true;
+        var len = Math.abs(w.a[0] - w.b[0]) + Math.abs(w.a[1] - w.b[1]);
+        if (len > best) { best = len; longest = w; }
+      });
+      info.label[longest.id] = i + 1; // the number is written once, on the longest stretch
+      info.nets.push({ num: i + 1, root: root });
+    });
+    if (classCache) classCache.set(topo, info);
+    return info;
   };
 
   /** True when the element's terminals leave sideways (a horizontal element): labels go above/below. */

@@ -119,6 +119,7 @@
   A.changed = function () {
     A.redraw();
     renderTabs();
+    if (A.onStatus) A.onStatus();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(persist, 400);
   };
@@ -394,10 +395,19 @@
   };
   /** As in the original: message, stop, back to editing. */
   A.fault = function (t, f) {
+    // remember where the potentials met so the drawing can show it
+    var fw = new Set();
+    if (t.sim && t.sim.wirePot) Object.keys(t.sim.wirePot).forEach(function (id) {
+      var m = t.sim.wirePot[id], n = 0;
+      while (m) { n += m & 1; m >>= 1; }
+      if (n > 1) fw.add(+id);
+    });
+    t.faultWires = fw; t.faultUntil = performance.now() / 1000 + 8;
     t.mode = "edit"; A.pressed = null;
-    setStatus("Preparat");
-    message(SL.FAULTS[f] || f);
+    setStatus((SL.FAULTS[f] || f) + (fw.size ? " — els conductors afectats parpellegen en vermell" : ""));
     refreshAll();
+    // first let the drawing show where it happened, then the message
+    setTimeout(function () { message(SL.FAULTS[f] || f); }, fw.size ? 1200 : 0);
   };
   A.runSim = function (now) {
     var dt = A.lastT == null ? 0 : Math.min(0.25, Math.max(0, (now - A.lastT) / 1000));
@@ -585,9 +595,11 @@
     var size = radios("size", Object.keys(SL.PAGE_SIZES).map(function (k) { return [k, SL.PAGE_SIZES[k].label]; }), pg.size);
     var b = check("Contorn", pg.border), r = check("Referències", pg.references), t = check("Caixetí", pg.title_block), s = check("Visualitza connexions símbol", pg.show_terminals);
     var xr = check("Referències creuades sota les bobines", pg.xref !== false);
-    dialog("Configuració", [el("div", { text: "Format" }), size, b, r, xr, t, s], [["D'acord", function () {
+    var wn = check("Numera els conductors", !!pg.wire_numbers);
+    dialog("Configuració", [el("div", { text: "Format" }), size, b, r, xr, wn, t, s], [["D'acord", function () {
       A.checkpoint();
       pg.xref = xr.input.checked;
+      pg.wire_numbers = wn.input.checked;
       pg.size = size.value() || pg.size; pg.border = b.input.checked; pg.references = r.input.checked;
       pg.title_block = t.input.checked; pg.show_terminals = s.input.checked;
       A.changed();
@@ -1045,7 +1057,8 @@
         ["Nou", A.newDoc, "⌘N"], ["Obre...", A.open, "⌘O"], ["Tanca", function () { A.requestClose(A.active); }],
         ["Desa", A.save, "⌘S"], ["Anomena i desa...", A.saveAs], "-",
         ["Exporta imatge (PNG)...", A.exportImage], ["Exporta en vectorial (SVG)...", function () { A.exportSVG(); }],
-        ["Llista de materials (CSV)...", function () { A.exportBOM(); }], "-",
+        ["Llista de materials (CSV)...", function () { A.exportBOM(); }],
+        ["Llista de connexions (CSV)...", function () { A.exportNets(); }], "-",
         ["Imprimeix / desa en PDF...", function () { A.printVector(); }, "⌘P"], ["Imprimeix com a imatge...", A.print], "-",
         ["Fulls", [
           ["Afegeix un full", A.addSheet, null, !edit], ["Elimina l'últim full (si és buit)", A.removeSheet, null, !edit || SL.sheetCount(t.doc) < 2], "-"]
@@ -1079,6 +1092,13 @@
         ["Zoom +", function () { A.zoomCenter(1.25); }], ["Zoom -", function () { A.zoomCenter(0.8); }],
         ["Zoom finestra", function () { A.setTool({ t: "zoomwin" }); }], ["Zoom tot", function () { A.pushView(); A.zoomAll(); }], "-",
         ["Reixeta", function () { A.grid = !A.grid; renderToolbars(); A.redraw(); }, null, false, A.grid], "-",
+        ["Tema", [["Automàtic (segons el sistema)", function () { A.setTheme(""); }, null, false, !A.theme],
+          ["Clar", function () { A.setTheme("light"); }, null, false, A.theme === "light"],
+          ["Fosc", function () { A.setTheme("dark"); }, null, false, A.theme === "dark"]]],
+        ["Panell de propietats", function () { A.togglePref("props"); }, null, false, A.prefOn && A.prefOn("props")],
+        ["Minimapa", function () { A.togglePref("minimap"); }, null, false, A.prefOn && A.prefOn("minimap")],
+        ["Llegenda de colors", function () { A.togglePref("legend"); }, null, false, A.prefOn && A.prefOn("legend")],
+        ["Animació del corrent", function () { A.togglePref("flow"); }, null, false, A.prefOn && A.prefOn("flow")], "-",
         ["Cronograma", function () { A.showPanel(A.panelOpen("chrono") ? null : "chrono"); }, null, false, A.panelOpen && A.panelOpen("chrono")],
         ["Registre d'esdeveniments", function () { A.showPanel(A.panelOpen("log") ? null : "log"); }, null, false, A.panelOpen && A.panelOpen("log")]]],
       ["Barres", [
@@ -1159,6 +1179,10 @@
   function updateStatus() {
     var t = A.tab();
     $("mode").textContent = { edit: "Edició", sim: "Simulació", pause: "Pausa" }[t.mode];
+    var app = $("app");
+    app.classList.toggle("mode-sim", t.mode === "sim");
+    app.classList.toggle("mode-pause", t.mode === "pause");
+    if (A.onStatus) A.onStatus();
     $("simtime").textContent = t.mode !== "edit" && t.sim ? "t = " + t.sim.time.toFixed(1) + " s" : "";
     $("zoom").textContent = "Zoom " + Math.round(t.view.zoom * 100 / 0.75) + "%";
     $("coords").textContent = A.hover ? "X: " + Math.round(A.hover[0] / 5) + " mm  Y: " + Math.round(A.hover[1] / 5) + " mm" : "";

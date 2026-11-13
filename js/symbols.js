@@ -45,7 +45,10 @@
     s.l([x, y0 + 42], [x, y0 + 60]);
     if (nc) s.l([x, y0 + 18], [x + 10, y0 + 18]);
     var pivot = [x, y0 + 42];
-    var tip = closed ? (nc ? [x + 11, y0 + 15] : [x - 1.5, y0 + 17]) : [x - 14, y0 + 18];
+    var shut = nc ? [x + 11, y0 + 15] : [x - 1.5, y0 + 17], open = [x - 14, y0 + 18];
+    // s.closedT (0..1) animates the blade between open and closed
+    var k = s.closedT != null ? s.closedT : (closed ? 1 : 0);
+    var tip = [open[0] + (shut[0] - open[0]) * k, open[1] + (shut[1] - open[1]) * k];
     s.l(pivot, tip);
     if (contactor) s.a([x, y0 + 13], 5, 0, PI);
     if (breaker) {
@@ -97,7 +100,8 @@
     for (var k = 0; k < 3; k++) {
       var ang = a + k * (2 * PI / 3);
       var px = c[0] + r * Math.cos(ang), py = c[1] + r * Math.sin(ang);
-      s.prims.push({ t: "circle", c: [px, py], r: 3, fill: "rgb(0,150,0)", color: "rgb(0,110,0)" });
+      s.prims.push({ t: "line", a: c, b: [px, py], color: "rgba(0,120,0,0.55)" }); // spoke
+      s.prims.push({ t: "circle", c: [px, py], r: 4.2, fill: "rgb(0,170,0)", color: "rgb(0,110,0)" });
       if (dir) {
         var tang = ang - dir * 0.35;
         var tx = c[0] + r * Math.cos(tang), ty = c[1] + r * Math.sin(tang);
@@ -110,6 +114,7 @@
   SL.buildSymbol = function (kind, v) {
     v = v || {};
     var K = SL.KINDS[kind], s = new Sym(), i, x;
+    if (v.closedT != null) s.closedT = v.closedT;
     switch (kind) {
       case "FeedL": case "FeedN": case "FeedPE": case "FeedLN": case "FeedLNPE": case "FeedL123":
       case "FeedL123PE": case "FeedL123N": case "FeedL123NPE": case "FeedPos": case "FeedNeg": case "FeedPosNeg":
