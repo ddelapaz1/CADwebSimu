@@ -6,7 +6,8 @@ var SL = (typeof globalThis !== "undefined" ? globalThis : window).SL || {};
 
 SL.GRID = 15;
 
-SL.POT = { L1: 1, L2: 2, L3: 4, N: 8, PE: 16, POS: 32, NEG: 64 };
+// LV / LVN: 24 V AC secondary of a control transformer (an isolated circuit of its own)
+SL.POT = { L1: 1, L2: 2, L3: 4, N: 8, PE: 16, POS: 32, NEG: 64, LV: 128, LVN: 256 };
 
 SL.CATS = [
   { id: "Feeds", label: "Alimentacions", bar: "Barra d'alimentacions", icon: "FeedL" },
@@ -21,6 +22,7 @@ SL.CATS = [
   { id: "Coils", label: "Bobines, Senyalitzacions", bar: "Barra de bobines", icon: "Coil" },
   { id: "ElecRelays", label: "Relés electrònics", bar: "Barra de relés electrònics", icon: "SsrDC" },
   { id: "Logic", label: "Lògica", bar: "Barra de lògica", icon: "LogicAnd" },
+  { id: "PLC", label: "Autòmat LOGO!", bar: "Barra LOGO!", icon: "Logo230" },
   { id: "Connections", label: "Cables i Connexions", bar: "Barra de connexions", icon: "Terminal" },
 ];
 
@@ -218,6 +220,12 @@ SL.CATS = [
     ["Logic7SegDp", "Logic", "Display de 7 segments amb punt decimal", "Logic", 0, false, "-P"],
     ["LogicPreset", "Logic", "Preselector", "Logic", 0, false, "-S"],
     ["LogicWire", "Logic", "Cable positiu", "Tool", 0, false, "", "wire"],
+    ["Logo230", "PLC", "LOGO! 230RCE (230 V CA)", "Logo", 0, false, "-A"],
+    ["Logo24", "PLC", "LOGO! 24RCE (24 V CC)", "Logo", 0, false, "-A"],
+    ["LogoI", "PLC", "Entrada I (programa)", "Logic", 0, false, "I"],
+    ["LogoQ", "PLC", "Sortida Q (programa)", "Logic", 0, false, "Q"],
+    ["LogoHi", "PLC", "Constant hi (1)", "Logic", 0, false, ""],
+    ["LogoLo", "PLC", "Constant lo (0)", "Logic", 0, false, ""],
     ["LogicJunction", "Logic", "Connexió", "Tool", 0, false, "", "junction"],
     ["Wire", "Connections", "Cable", "Tool", 0, false, "", "wire"],
     ["Junction", "Connections", "Punt de connexió", "Tool", 0, false, "", "junction"],
@@ -338,6 +346,15 @@ SL.normalizeDoc = function (d) {
       value: Math.max(0, Math.min(9, +c.value | 0)), // logic preselector digit
       lx: +c.lx || 0, ly: +c.ly || 0, // name label moved by the user
       auto_reset: !!c.auto_reset, // overload relay: automatic reset
+      coil_v: c.coil_v || "",     // rated voltage of a coil / lamp ("" = not checked)
+      secondary: c.secondary || "230", // transformer secondary: 230 or 24 (V AC)
+      power: +c.power || 0,       // motor kW / other loads W (0 = not given)
+      rating: +c.rating || 0,     // protection rating / overload setting in A (0 = not checked)
+      curve: c.curve || "",       // MCB curve B/C/D, fuse gG/aM
+      ts_mode: c.ts_mode === "clock" ? "clock" : "cycle", // time switch: ON/OFF cycle or daily clock
+      clock_start: c.clock_start || "07:55", on_time: c.on_time || "08:00", off_time: c.off_time || "17:00",
+      clock_speed: +c.clock_speed || 60, // simulated seconds per real second
+      module: c.module || "",      // LOGO! program block: name of its module ("" = the first one)
     };
   });
   n.wires = (d.wires || []).map(function (w) { return { id: w.id, a: [w.a[0], w.a[1]], b: [w.b[0], w.b[1]] }; });

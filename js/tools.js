@@ -503,6 +503,43 @@
       box.appendChild(el("label", { text: "Multiplicador" })); box.appendChild(sel);
     }
     if (K.counter) field("Preselecció (polsos)", "count_preset", "number", function (v) { return Math.max(1, parseInt(v, 10) || 1); });
+    function choice(label, key, options, def) {
+      var sel = el("select");
+      options.forEach(function (o) { var op = el("option", { text: o[1] }); op.value = o[0]; if (String(c[key] || def || "") === String(o[0])) op.selected = true; sel.appendChild(op); });
+      sel.addEventListener("change", function () { A.checkpoint(); c[key] = sel.value; A.changed(); propsSig = ""; renderProps(); });
+      box.appendChild(el("label", { text: label })); box.appendChild(sel);
+    }
+    function hint(text) { box.appendChild(el("div", { class: "k", text: text })); }
+    var twoTerm = SL.baseSymbol(c.kind).terms.length === 2;
+    if (K.role === "Load" && !K.motor && twoTerm) {
+      choice("Tensió nominal", "coil_v", SL.COIL_VOLTAGES, "");
+      if (c.coil_v) hint("Amb més tensió de la nominal es crema; amb menys, o amb CA/CC equivocat, no actua.");
+    }
+    if (c.kind === "Transformer1") choice("Secundari", "secondary", [["230", "230 V CA"], ["24", "24 V CA (circuit aïllat)"]], "230");
+    if (K.motor) {
+      field("Potència (kW)", "power", "number", num);
+      if (c.power) hint("Corrent nominal ≈ " + SL.ratedCurrent(c).toFixed(1) + " A; en arrencar directe ≈ " + (6 * SL.ratedCurrent(c)).toFixed(0) + " A.");
+      else hint("Indiqueu la potència per calcular-ne el corrent i comprovar les proteccions.");
+    }
+    if (/^(Fuse\d|FuseSw|Auto|Breaker)/.test(c.kind) || c.kind === "ThermalRelay3") {
+      field(c.kind === "ThermalRelay3" || /^Breaker/.test(c.kind) ? "Regulació (A)" : "Calibre (A)", "rating", "number", num);
+      if (/^Auto/.test(c.kind)) choice("Corba", "curve", [["B", "B (3-5 In)"], ["C", "C (5-10 In)"], ["D", "D (10-20 In)"]], "C");
+      if (/^Fuse/.test(c.kind)) choice("Tipus", "curve", [["gG", "gG (ús general)"], ["aM", "aM (motors)"]], "gG");
+      hint(c.rating ? "Es comprova amb el corrent dels motors i càrregues amb potència indicada." : "0 = sense comprovar el corrent.");
+    }
+    if (c.kind === "TimeSwitch") {
+      choice("Programa", "ts_mode", [["cycle", "Cicle ON/OFF"], ["clock", "Rellotge diari"]], "cycle");
+      if (c.ts_mode === "clock") {
+        field("Hora d'inici de la simulació", "clock_start");
+        field("Hora d'encesa", "on_time");
+        field("Hora d'apagada", "off_time");
+        field("Velocitat (s simulats per segon)", "clock_speed", "number", function (v) { return Math.max(1, parseFloat(v) || 60); });
+      }
+    }
+    if (c.kind === "LogoI" || c.kind === "LogoQ") {
+      field("Mòdul LOGO! (buit = el primer)", "module");
+      hint(c.kind === "LogoI" ? "El nom (I1…I8) diu quina entrada llegeix." : "El nom (Q1…Q4) diu quin relé de sortida governa.");
+    }
     if (c.kind === "ThermalRelay3") {
       var cb = el("input", { type: "checkbox" }); cb.checked = !!c.auto_reset;
       cb.addEventListener("change", function () { A.checkpoint(); c.auto_reset = cb.checked; A.changed(); });
@@ -641,4 +678,60 @@
       A.message("No s'ha pogut preparar la còpia sense connexió (" + e.message + "). Aquesta opció s'ha de fer servir des de la web publicada.");
     });
   };
+
+  // ================================================================ share by link
+  // The schematic travels in the part after "#", which browsers never send to the server.
+  function b64url(bytes) {
+    var bin = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function unb64url(s) {
+    s = s.replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function pipe(bytes, stream) {
+    return new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer().then(function (b) { return new Uint8Array(b); });
+  }
+  /** Document -> "z<deflated base64url>" (or "j<base64url>" without compression support). */
+  SL.encodeDoc = function (doc) {
+    var bytes = new TextEncoder().encode(JSON.stringify(doc));
+    if (typeof CompressionStream === "undefined") return Promise.resolve("j" + b64url(bytes));
+    return pipe(bytes, new CompressionStream("deflate-raw")).then(function (z) { return "z" + b64url(z); });
+  };
+  SL.decodeDoc = function (code) {
+    var raw = unb64url(code.slice(1));
+    var p = code[0] === "z" ? pipe(raw, new DecompressionStream("deflate-raw")) : Promise.resolve(raw);
+    return p.then(function (bytes) { return JSON.parse(new TextDecoder().decode(bytes)); });
+  };
+
+  A.shareLink = function () {
+    var t = A.tab();
+    SL.encodeDoc(t.doc).then(function (code) {
+      var url = location.href.split("#")[0].split("?")[0] + "#e=" + code;
+      var inp = el("input", { type: "text" }); inp.value = url; inp.readOnly = true; inp.style.width = "100%";
+      var note = url.length > 8000 ? "L'enllaç és llarg (" + Math.round(url.length / 1000) + " k caràcters): funciona al navegador, però alguns xats o correus el poden tallar. En aquest cas, compartiu el fitxer .ecs." : "Qui obri l'enllaç veurà aquest esquema en una pestanya nova (també les avaries amagades, si n'hi ha).";
+      ui().dialog("Comparteix per enllaç", [inp, el("div", { class: "hint", text: note })], [["Copia l'enllaç", function () {
+        var done = function () { A.setStatus("Enllaç copiat al porta-retalls"); };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { inp.select(); document.execCommand("copy"); done(); });
+        else { inp.select(); document.execCommand("copy"); done(); }
+      }], ["Tanca", null]]);
+      setTimeout(function () { inp.select(); }, 0);
+    });
+  };
+
+  function openFromHash() {
+    var m = /#e=([A-Za-z0-9_-]+)/.exec(location.hash);
+    if (!m) return;
+    SL.decodeDoc(m[1]).then(function (doc) {
+      A.openDoc("Esquema compartit", doc);
+      A.setStatus("S'ha obert l'esquema compartit per enllaç. Deseu-lo (⌘S) si el voleu conservar.");
+      history.replaceState(null, "", location.href.split("#")[0]);
+    }).catch(function () { A.message("L'enllaç no conté un esquema vàlid (potser està incomplet)."); });
+  }
+  window.addEventListener("hashchange", openFromHash);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", openFromHash); else setTimeout(openFromHash, 0);
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);

@@ -42,10 +42,17 @@ Editor i simulador d'esquemes elèctrics de comandament i potència que funciona
   de propietats lateral, minimapa, llegenda de colors i animació del corrent pels conductors.
 - Conductors de potència més gruixuts, numeració de conductors i llista de connexions (CSV).
 
+- **Autòmat Siemens LOGO!** (230RCE i 24RCE): entrades I1-I8 i relés Q1-Q4 reals a l'esquema i
+  programa en diagrama de blocs amb els blocs I, Q, hi/lo i tota la lògica (exemple 4 a Ajuda).
+- Tensió nominal de bobines i pilots (es cremen o no actuen), transformador amb secundari de
+  24 V CA, potència dels motors, calibre i corba de les proteccions (dispar magnètic i tèrmic),
+  interruptor horari amb rellotge diari i **compartir l'esquema per enllaç**.
+
 ## Exemples
 - `?ejemplo=1` arrencada directa d'un motor
 - `?ejemplo=2` arrencada estrella-triangle (afegiu `&simular=1` per veure'l en marxa)
 - `?ejemplo=3` inversió de gir d'un motor
+- `?ejemplo=4` marxa i aturada amb un LOGO!
 
 ## Proves
 `node test/sim.test.js`

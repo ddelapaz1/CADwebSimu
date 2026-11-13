@@ -988,6 +988,49 @@
         s.text([27.5, 15], "▲", 7); s.text([27.5, 75], "BCD", 6);
         ["1", "2", "4", "8"].forEach(function (t, i) { lout(s, 30 * i, t, v, i); });
         break;
+      case "Logo230": case "Logo24": {
+        // LOGO! base module: supply and inputs on top, relay outputs Q1..Q4 underneath
+        var dc24 = kind === "Logo24", run = !!v.powered;
+        s.r([-12, 15], [282, 135], "rgb(228,231,236)");
+        [dc24 ? "L+" : "L1", dc24 ? "M" : "N", "I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8"].forEach(function (lab, k) {
+          s.l([30 * k, 0], [30 * k, 15]);
+          s.term(30 * k, 0, lab);
+          if (k >= 2) { s.c([30 * k, 25], 3, v.inp && v.inp[k - 2] ? "rgb(40,200,60)" : "rgb(200,204,210)"); }
+        });
+        s.r([60, 40], [200, 98], run ? "rgb(178,212,160)" : "rgb(160,170,160)");
+        var row = function (arr, n) { var o = ""; for (var j = 0; j < n; j++) o += arr && arr[j] ? "■" : "·"; return o; };
+        s.text([130, 54], "I " + row(v.inp, 8), 10); s.col("rgb(25,40,25)");
+        s.text([130, 70], "Q " + row(v.q, 4) + "    " + (run ? "RUN" : "STOP"), 10); s.col("rgb(25,40,25)");
+        s.text([130, 87], v.burnt ? "AVARIAT" : (dc24 ? "24RCE" : "230RCE"), 8); s.col(v.burnt ? "rgb(200,0,0)" : "rgb(25,40,25)");
+        s.text([242, 52], "LOGO!", 14); s.col("rgb(0,120,140)");
+        s.text([242, 70], "SIEMENS", 6); s.col("rgb(0,120,140)");
+        for (var q4 = 0; q4 < 4; q4++) {
+          var xq = 60 * q4;
+          s.l([xq, 135], [xq, 150]); s.l([xq + 30, 135], [xq + 30, 150]);
+          s.text([xq + 15, 122], "Q" + (q4 + 1), 8); s.col("rgb(60,60,60)");
+          s.c([xq + 15, 108], 3, v.q && v.q[q4] ? "rgb(40,200,60)" : "rgb(200,204,210)");
+          s.term(xq, 150, "1"); s.term(xq + 30, 150, "2");
+        }
+        break;
+      }
+      case "LogoI":
+        s.r([0, -12], [30, 12], v.outs && v.outs[0] ? "rgb(255,236,170)" : "rgb(255,250,225)");
+        s.text([15, 0], "I", 11);
+        s.l([30, 0], [45, 0]); if (v.outs) s.col(v.outs[0] ? LOGIC_ON : LOGIC_OFF);
+        s.term(45, 0, "", [1, 0]);
+        break;
+      case "LogoQ":
+        lin(s, 0, "", v, 0);
+        s.r([15, -12], [45, 12], v.outs && v.outs[0] ? "rgb(190,235,190)" : "rgb(236,246,236)");
+        s.text([30, 0], "Q", 11);
+        lout(s, 0, "", v, 0);
+        break;
+      case "LogoHi": case "LogoLo":
+        s.r([0, -12], [30, 12], WHITE);
+        s.text([15, 0], kind === "LogoHi" ? "hi" : "lo", 10);
+        s.l([30, 0], [45, 0]); if (v.outs) s.col(v.outs[0] ? LOGIC_ON : LOGIC_OFF);
+        s.term(45, 0, "", [1, 0]);
+        break;
       case "LogicWire":
         s.l([0, 15], [30, 15]); s.col(LOGIC_ON);
         s.text([15, 4], "+", 9); s.col(LOGIC_ON);

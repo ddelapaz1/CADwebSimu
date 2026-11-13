@@ -794,5 +794,74 @@ test("every element has its teaching notes", () => {
   eq(SL.kindInfo("Contactor3").specs[0], "Versió tripolar (3 pols).");
 });
 
+test("LOGO!: start/stop programmed with an SR flip-flop", () => {
+  const d = SL.exampleLogoDoc(), id = (k, n) => d.comps.find((c) => c.kind === k && c.name === n).id;
+  const s = new SL.Sim(d), A1 = id("Logo230", "-A1"), km = id("Coil", "-KM1"), s1 = id("PushNO", "-S1"), s0 = id("PushNC", "-S0");
+  eq(s.tick(d, 0.1), null);
+  eq([s.st[A1].powered, s.st[A1].inp.slice(0, 2)], [true, [false, true]], "RUN; I2 high through the NC stop button");
+  eq(s.st[km].on, false);
+  s.setActuator(d, s1, true); s.tick(d, 0.1);
+  eq([s.st[A1].q[0], s.st[km].on], [true, true], "Q1 closes and KM1 pulls in");
+  s.setActuator(d, s1, false); s.tick(d, 0.1);
+  eq(s.st[km].on, true, "latched by the program");
+  s.setActuator(d, s0, true); s.tick(d, 0.1); s.setActuator(d, s0, false); s.tick(d, 0.1);
+  eq(s.st[km].on, false, "stop");
+  // a 24 V module fed at 230 V breaks
+  const d2 = SL.newDoc();
+  SL.makeComp(d2, "FeedLN", 300, 270, 0, "");
+  const m24 = SL.makeComp(d2, "Logo24", 300, 300, 0, "-A1");
+  const s2 = new SL.Sim(d2); s2.tick(d2, 0.1);
+  eq([!!s2.st[m24.id].burnt, !!s2.st[m24.id].powered], [true, false], "24RCE on 230 V: damaged");
+});
+
+test("coil voltage, 24 V AC transformer, currents and ratings, clock time switch, share codec", () => {
+  // coil voltages
+  const coil = (volt, feed) => {
+    const d = SL.newDoc();
+    SL.makeComp(d, feed, 300, 120, 0, "");
+    const c = SL.makeComp(d, "Coil", 300, 150, 0, "-KM1", { coil_v: volt });
+    SL.addWire(d, [300, 210], [330, 210]); SL.addWire(d, [330, 150], [330, 210]);
+    const s = new SL.Sim(d); s.tick(d, 0.1);
+    return [s.st[c.id].on, !!s.st[c.id].burnt];
+  };
+  eq(coil("230AC", "FeedLN"), [true, false], "230 V coil on 230 V");
+  eq(coil("24DC", "FeedLN"), [false, true], "24 V coil on 230 V burns");
+  eq(coil("230AC", "FeedPosNeg"), [false, false], "230 V coil on 24 V DC does not pull in");
+  eq(coil("", "FeedPosNeg"), [true, false], "unchecked coil works as before");
+  // 24 V AC secondary
+  const d = SL.newDoc();
+  SL.makeComp(d, "FeedLN", 300, 90, 0, "");                                    // L (300,120) N (330,120)
+  const tr = SL.makeComp(d, "Transformer1", 300, 120, 0, "-T1", { secondary: "24" }); // sec (300,180) (330,180)
+  const c24 = SL.makeComp(d, "Coil", 300, 240, 0, "-KA1", { coil_v: "24AC" });
+  SL.addWire(d, [300, 180], [300, 240]); SL.addWire(d, [330, 180], [330, 300]); SL.addWire(d, [300, 300], [330, 300]);
+  const s = new SL.Sim(d); eq(s.tick(d, 0.1), null);
+  eq(s.st[c24.id].on, true, "24 V AC coil on the secondary");
+  eq(SL.voltage(SL.POT.LV, SL.POT.LVN), "24 V CA");
+  // rated currents: 4 kW motor ~ 8 A; start 6x trips a 10 A B-curve breaker? (48 A < 50 A) no; a 6 A one yes
+  const mot = SL.newDoc();
+  SL.makeComp(mot, "FeedL123", 150, 90, 0, "");
+  const q = SL.makeComp(mot, "Auto3", 150, 120, 0, "-Q1", { closed: true, rating: 6, curve: "B" });
+  const m = SL.makeComp(mot, "Motor3", 150, 180, 0, "-M1", { power: 4 });
+  eq(Math.round(SL.ratedCurrent(m)), 8);
+  const sm = new SL.Sim(mot); sm.tick(mot, 0.1);
+  eq(sm.st[q.id].act, false, "starting current trips a 6 A B-curve MCB instantly");
+  q.rating = 16; q.curve = "C"; q.closed = true;
+  const sm2 = new SL.Sim(mot); for (let i = 0; i < 20; i++) sm2.tick(mot, 0.1);
+  eq([sm2.st[q.id].act, sm2.st[m.id].motor], [true, 1], "16 A C-curve MCB holds the start");
+  q.rating = 6; q.curve = "D";
+  const sm3 = new SL.Sim(mot); for (let i = 0; i < 400; i++) sm3.tick(mot, 0.1);
+  eq(sm3.st[q.id].act, false, "8 A through a 6 A D-curve MCB: thermal trip within 40 s");
+  // clock time switch
+  const ts = { clock_start: "07:59", on_time: "08:00", off_time: "08:01", clock_speed: 60 };
+  eq(SL.fmtClock(SL.clockOf(ts, 0.5)), "07:59"); eq(SL.fmtClock(SL.clockOf(ts, 1)), "08:00"); eq(SL.fmtClock(SL.clockOf(ts, 120)), "09:59");
+  const dts = SL.newDoc();
+  SL.makeComp(dts, "FeedLN", 300, 120, 0, "");
+  const tsw = SL.makeComp(dts, "TimeSwitch", 300, 150, 0, "-KT1", Object.assign({ ts_mode: "clock" }, ts));
+  SL.addWire(dts, [300, 210], [330, 210]); SL.addWire(dts, [330, 150], [330, 210]);
+  const sts = new SL.Sim(dts); sts.tick(dts, 0.1); eq(sts.st[tsw.id].on, false, "07:59 off");
+  for (let i = 0; i < 10; i++) sts.tick(dts, 0.1); eq(sts.st[tsw.id].on, true, "08:00 on");
+  for (let i = 0; i < 70; i++) sts.tick(dts, 0.1); eq(sts.st[tsw.id].on, false, "08:01 off");
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");

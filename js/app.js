@@ -149,9 +149,16 @@
     A.sel.clear();
     A.changed();
   };
+  /** Open a document in a new tab. */
+  A.openDoc = function (title, doc) {
+    A.tabs.push(newTab(title, SL.normalizeDoc(doc)));
+    A.active = A.tabs.length - 1;
+    A.sel.clear();
+    A.changed(); refreshAll();
+  };
   A.loadExample = function (which) {
     A.docCounter++;
-    var doc = which === 3 ? SL.exampleRevDoc() : which === 2 ? SL.exampleYdDoc() : SL.exampleDoc();
+    var doc = which === 4 ? SL.exampleLogoDoc() : which === 3 ? SL.exampleRevDoc() : which === 2 ? SL.exampleYdDoc() : SL.exampleDoc();
     A.tabs.push(newTab("Exemple" + A.docCounter, doc));
     A.active = A.tabs.length - 1;
     A.sel.clear();
@@ -1061,6 +1068,7 @@
         ["Llista de materials (CSV)...", function () { A.exportBOM(); }],
         ["Llista de connexions (CSV)...", function () { A.exportNets(); }], "-",
         ["Imprimeix / desa en PDF...", function () { A.printVector(); }, "⌘P"], ["Imprimeix com a imatge...", A.print], "-",
+        ["Comparteix per enllaç...", function () { A.shareLink(); }],
         ["Descarrega per fer servir sense connexió...", function () { A.downloadOffline(); }], "-",
         ["Fulls", [
           ["Afegeix un full", A.addSheet, null, !edit], ["Elimina l'últim full (si és buit)", A.removeSheet, null, !edit || SL.sheetCount(t.doc) < 2], "-"]
@@ -1120,6 +1128,7 @@
           ["Motor - Arrencada directa", function () { A.loadExample(1); }],
           ["Motor - Inversió de gir", function () { A.loadExample(3); }],
           ["Motor - Arrencada estrella-triangle", function () { A.loadExample(2); }],
+          ["LOGO! - Marxa i aturada amb autoretenció", function () { A.loadExample(4); }],
         ]],
         "-",
         ["Quant a CADwebSimu...", A.about]]],

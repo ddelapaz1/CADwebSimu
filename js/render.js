@@ -21,6 +21,8 @@
       case P.PE: return C.GREEN;
       case P.POS: return C.RED;            // estimated
       case P.NEG: return "rgb(0,0,160)";   // estimated
+      case P.LV: return "rgb(170,0,170)";  // 24 V AC
+      case P.LVN: return "rgb(110,90,200)"; // 24 V AC common
     }
     return null;
   };

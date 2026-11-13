@@ -22,8 +22,29 @@
   function validPair(a, b) {
     if (!a || !b || a === b) return false;
     return (isPhase(a) && (isPhase(b) || b === P.N)) || (isPhase(b) && a === P.N) ||
-      (a === P.POS && b === P.NEG) || (a === P.NEG && b === P.POS);
+      (a === P.POS && b === P.NEG) || (a === P.NEG && b === P.POS) ||
+      (a === P.LV && b === P.LVN) || (a === P.LVN && b === P.LV);
   }
+
+  /** Voltage between two potentials: { v: 400 | 230 | 24, ac } or null. */
+  function applied(a, b) {
+    if (!validPair(a, b)) return null;
+    if (isPhase(a) && isPhase(b)) return { v: 400, ac: true };
+    if (a === P.POS || a === P.NEG) return { v: 24, ac: false };
+    if (a === P.LV || a === P.LVN) return { v: 24, ac: true };
+    return { v: 230, ac: true };
+  }
+  SL.appliedVoltage = applied;
+  SL.COIL_VOLTAGES = [["", "Sense comprovar"], ["24DC", "24 V CC"], ["24AC", "24 V CA"], ["230AC", "230 V CA"], ["400AC", "400 V CA"]];
+  /** Rated coil voltage vs applied: "ok", "low" (does not pull in), "type" (AC/DC mismatch) or "burn". */
+  function coilVoltage(rated, ap) {
+    var vn = parseInt(rated, 10), acn = /AC$/.test(rated);
+    if (ap.v > vn * 1.5) return "burn";
+    if (ap.ac !== acn) return "type";
+    if (ap.v < vn * 0.7) return "low";
+    return "ok";
+  }
+  SL.coilVoltage = coilVoltage;
 
   /** L1-L2-L3 and rotations forward (1), other orders reverse (-1) (sub_4ac380). */
   function orderDir(a, b, c) {
@@ -306,6 +327,11 @@
     return { idx: idx, coordList: coordList, pts: pts, base: base, terms: terms, wireNode: wireNode };
   }
 
+  /** "hh:mm" -> seconds of the day. */
+  SL.hm = function (s) { var m = /^(\d{1,2}):(\d{2})$/.exec(String(s).trim()); return m ? (+m[1] % 24) * 3600 + (+m[2] % 60) * 60 : 0; };
+  /** Time of day (s) of a clock time switch after t simulated seconds. */
+  SL.clockOf = function (c, t) { return (SL.hm(c.clock_start || "07:55") + t * (+c.clock_speed || 60)) % 86400; };
+  SL.fmtClock = function (s) { s = Math.floor(s); var h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60; return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m; };
   SL.MOTOR_ACCEL = 0.6; // s to full speed, direct-on-line start
   SL.MOTOR_DECEL = 1.0; // s to stop when the supply goes
   /** Running speed of a motor as a fraction (drawing speed and the % shown). */
@@ -385,6 +411,12 @@
   /** Pairs of terminal indexes an element joins right now (closed contacts, poles, passive parts...). */
   Sim.prototype.conductPairs = function (doc, c, drivers) {
     var self = this, out = [], K = SL.KINDS[c.kind], t = SL.baseSymbol(c.kind).terms;
+    if (K.role === "Logo") {
+      // relay outputs Q1..Q4: terminals 10+2k and 11+2k close while the program sets Qk (in RUN)
+      var ls = this.s(c.id);
+      if (ls.powered && ls.q) for (var qk = 0; qk < 4; qk++) if (ls.q[qk]) out.push([10 + 2 * qk, 11 + 2 * qk]);
+      return out;
+    }
     (function () {
       if (c.kind === "SsrDC" || c.kind === "SsrAC") {
         if (self.s(c.id).on && t.length >= 2) out.push([0, 1]);
@@ -473,7 +505,8 @@
         if (c.kind === "Transformer1") {
           var ok1 = validPair(p0, p1);
           st.energized = st.on = ok1;
-          if (ok1) { addPot(2, P.L1); addPot(3, P.N); }
+          // a 24 V secondary is a separate low-voltage circuit
+          if (ok1) { if (c.secondary === "24") { addPot(2, P.LV); addPot(3, P.LVN); } else { addPot(2, P.L1); addPot(3, P.N); } }
         } else if (c.kind === "Transformer3") {
           var ok3 = orderDir(p0, p1, p2) !== 0;
           st.energized = st.on = ok3;
@@ -551,6 +584,11 @@
       } else if (c.kind === "Flasher" || c.kind === "PulseGen") {
         if (st.energized) { st.t += dt; if (st.t >= Math.max(preset, 0.05)) { st.t = 0; st.on = !st.on; } }
         else { st.t = 0; st.on = false; }
+      } else if (c.kind === "TimeSwitch" && c.ts_mode === "clock") {
+        // daily program on an accelerated clock: ON between on_time and off_time
+        var now = SL.clockOf(c, self.time), on = SL.hm(c.on_time || "08:00"), off = SL.hm(c.off_time || "17:00");
+        st.clock = now;
+        st.phaseOn = on <= off ? (now >= on && now < off) : (now >= on || now < off);
       } else if (c.kind === "TimeSwitch") {
         // Cyclic program: ON for the preset time, then OFF for off_base, repeating
         if (st.energized) {
@@ -583,6 +621,29 @@
       for (var trips = 0; r.fault && trips < 8 && this.trip(doc, topo, r.fault); trips++) r = this.solve(doc, topo);
       if (r.fault) { this.fault = r.fault; return r.fault; }
       var changed = false;
+      // LOGO! modules: supply (RUN / STOP) and the state of the inputs I1..I8
+      doc.comps.forEach(function (c) {
+        if (SL.KINDS[c.kind].role !== "Logo") return;
+        var t = topo.terms[c.id], st = self.s(c.id), pots = t.map(function (j) { return single(r.out[j]); });
+        var dc = c.kind === "Logo24", ap = applied(pots[0], pots[1]);
+        if (ap && !st.burnt && ((dc && (ap.ac || ap.v > 36)) || (!dc && ap.v > 300))) {
+          st.burnt = true; (self.flash = self.flash || {})[c.id] = self.time;
+          self.note((c.name || "LOGO!") + ": s'ha avariat (alimentat a " + ap.v + " V " + (ap.ac ? "CA" : "CC") + ")");
+        }
+        var pw = !st.burnt && !!ap && (dc ? (pots[0] === P.POS && pots[1] === P.NEG) : (ap.ac && ap.v === 230));
+        var inp = [];
+        for (var k = 0; k < 8; k++) {
+          var pi = pots[2 + k];
+          inp.push(pw && (dc ? pi === P.POS : (isPhase(pi) && !!applied(pi, pots[1]))));
+        }
+        if (pw !== !!st.powered || String(inp) !== String(st.inp || [])) { changed = true; }
+        if (!pw) st.q = [false, false, false, false];
+        st.powered = pw; st.inp = inp; st.energized = pw; st.on = pw;
+      });
+      var logoOf = function (blk) {
+        return doc.comps.find(function (m) { return SL.KINDS[m.kind].role === "Logo" && (!blk.module || m.name === blk.module); });
+      };
+      var ioIndex = function (blk) { var m = /(\d+)/.exec(blk.name || ""); return m ? +m[1] - 1 : -1; };
       doc.comps.forEach(function (c) {
         if (SL.KINDS[c.kind].role !== "Logic") return;
         var t = topo.terms[c.id], st = self.s(c.id), io = SL.logicIO(c.kind);
@@ -593,14 +654,46 @@
           if (!ins[i] || (st.li && st.li[i]) || edged[k]) return false;
           return (edged[k] = true);
         };
-        var outs = logicEval(c, ins, st, edge);
+        var outs;
+        if (/^Logo/.test(c.kind)) {
+          // LOGO! program blocks: they only run while their module is in RUN
+          var mod = logoOf(c), ms = mod ? self.s(mod.id) : null, idx = ioIndex(c), run = !!(ms && ms.powered);
+          if (c.kind === "LogoI") outs = [run && idx >= 0 && idx < 8 && !!ms.inp[idx]];
+          else if (c.kind === "LogoHi") outs = [run];
+          else if (c.kind === "LogoLo") outs = [false];
+          else {
+            var qv = run && !!ins[0];
+            if (ms && idx >= 0 && idx < 4) {
+              ms.q = ms.q || [false, false, false, false];
+              if (ms.q[idx] !== qv) { ms.q[idx] = qv; changed = true; }
+            }
+            outs = [qv];
+          }
+        } else outs = logicEval(c, ins, st, edge);
         if (!st.lo || outs.some(function (o, k) { return o !== st.lo[k]; })) { st.lo = outs; changed = true; }
       });
       doc.comps.forEach(function (c) {
         if (SL.KINDS[c.kind].role !== "Load") return;
         var t = topo.terms[c.id];
         var pots = t.map(function (j) { return single(r.out[j]); });
-        if (self.flt(doc, c.id) === "open") pots = pots.map(function () { return 0; }); // burnt coil / open winding
+        var stv = self.s(c.id);
+        if (self.flt(doc, c.id) === "open" || stv.burnt) pots = pots.map(function () { return 0; }); // burnt coil / open winding
+        // rated voltage of coils and signalling devices
+        if (c.coil_v && !SL.KINDS[c.kind].motor && t.length === 2) {
+          var ap = applied(pots[0], pots[1]);
+          if (ap) {
+            var vr = coilVoltage(c.coil_v, ap), lab = (c.name || SL.KINDS[c.kind].label);
+            if (vr === "burn") {
+              stv.burnt = true; (self.flash = self.flash || {})[c.id] = self.time;
+              self.note(lab + ": s'ha cremat (rep " + ap.v + " V " + (ap.ac ? "CA" : "CC") + " i és de " + c.coil_v.replace("AC", " V CA").replace("DC", " V CC") + ")");
+              pots = pots.map(function () { return 0; });
+            } else if (vr !== "ok") {
+              if (!stv.vwarn) self.note(lab + ": no actua (" + (vr === "low" ? "tensió insuficient" : "corrent " + (ap.ac ? "altern" : "continu") + " en una bobina de " + (/AC$/.test(c.coil_v) ? "CA" : "CC")) + ")");
+              stv.vwarn = true;
+              pots = pots.map(function () { return 0; });
+            } else stv.vwarn = false;
+          }
+        }
         var st = self.s(c.id);
         if (c.kind === "Motor3") {
           var dir = orderDir(pots[0], pots[1], pots[2]);
@@ -695,6 +788,7 @@
       if (!changed) break;
     }
     doc.comps.forEach(function (c) { var st = self.s(c.id); st.prev = st.energized; if (st.cur) st.li = st.cur.slice(); });
+    this.protections(doc, dt);
     this.thermalOverload(doc, topo, r, dt);
     this.record(doc);
     return null;
@@ -776,7 +870,7 @@
       if (!SL.KINDS[c.kind].motor) return;
       var st = self.s(c.id), rate = 0, reason = "";
       if (st.twoPhase) { rate = 1 / SL.TRIP_TIME_THERMAL; reason = "motor funcionant amb dues fases o mal connectat"; }
-      else if (st.blocked && st.motor) { rate = 1 / SL.TRIP_TIME_BLOCKED; reason = "sobrecàrrega: motor frenat"; }
+      else if (st.blocked && st.motor && !c.power) { rate = 1 / SL.TRIP_TIME_BLOCKED; reason = "sobrecàrrega: motor frenat"; }
       if (rate) rootsOf(c).forEach(function (k) { if (!heat[k] || heat[k] < rate) { heat[k] = rate; why[k] = reason; } });
       // ramp: a starter or drive with a terminal on the motor's circuit sets the ramp time
       var mr = rootsOf(c), ramp = null;
@@ -790,6 +884,11 @@
       if (c.kind !== "ThermalRelay3") return;
       var st = self.s(c.id), ks = rootsOf(c), rate = 0, reason = "";
       ks.forEach(function (k) { if (heat[k] > rate) { rate = heat[k]; reason = why[k]; } });
+      // with a setting current, heat from the real current through the relay
+      if (c.rating > 0 && self.cur) {
+        var Ir = self.cur[c.id] || 0, rr = Ir / c.rating;
+        if (rr > 1.05 && (rr * rr - 1) / SL.RELAY_THERMAL_T > rate) { rate = (rr * rr - 1) / SL.RELAY_THERMAL_T; reason = "sobrecàrrega: " + Ir.toFixed(1) + " A amb regulació " + c.rating + " A"; }
+      }
       if (st.act) {
         st.heat = Math.max(0, (st.heat || 0) - dt / SL.THERMAL_COOL);
         if (c.auto_reset && st.heat <= 0.3) {
@@ -860,6 +959,14 @@
     if (!best) return false;
     var c = best.c, st = this.s(c.id), why = fault === "Short" ? "curtcircuit" : "derivació a terra";
     (this.flash = this.flash || {})[c.id] = this.time; // the tripped device flashes for a moment
+    this.tripDevice(doc, c, why);
+    return true;
+  };
+
+  /** Open a protective device: a fuse blows, a breaker/RCD trips. */
+  Sim.prototype.tripDevice = function (doc, c, why) {
+    var self = this, st = this.s(c.id);
+    (this.flash = this.flash || {})[c.id] = this.time;
     if (isFuse(c.kind)) {
       st.blown = true;
       this.note((c.name || "Fusible") + ": s'ha fos el fusible (" + why + "). Feu-hi clic per canviar-lo.");
@@ -869,7 +976,62 @@
       this.note((c.name || SL.KINDS[c.kind].label) + ": ha disparat " +
         (isRcd(c.kind) ? "el diferencial" : "la protecció") + " (" + why + ")");
     }
-    return true;
+  };
+
+  // ---------------------------------------------------------------- currents and ratings
+  var SQ3 = Math.sqrt(3);
+  /** Rated current (A) of a motor from its power in kW (typical efficiency and power factor). */
+  SL.ratedCurrent = function (c) {
+    var P = +c.power || 0;
+    if (!P) return 0;
+    if (c.kind === "MotorDC") return P * 1000 / (24 * 0.8);
+    if (c.kind === "Motor1" || c.kind === "Motor1Cap") return P * 1000 / (230 * 0.8 * 0.7);
+    if (SL.KINDS[c.kind].motor) return P * 1000 / (SQ3 * 400 * 0.85 * 0.85);
+    return 0;
+  };
+  /** Current a load draws now (A): motors 6×In while starting or stalled; other loads from their power in W. */
+  Sim.prototype.loadCurrent = function (c) {
+    var st = this.s(c.id), K = SL.KINDS[c.kind];
+    if (K.motor) {
+      var In = SL.ratedCurrent(c);
+      if (!In || !st.motor) return 0;
+      if (st.blocked) return 6 * In;
+      var starting = (st.spd || 0) < 0.95 * motorLevel(c, st);
+      if (!starting) return In;
+      if (st.rampT) return 3 * In;                       // soft starter / drive
+      if (c.kind === "Motor3YD" && st.conn === 1) return 2 * In; // star: a third of direct-on-line
+      if (c.kind === "Motor3WR" && st.steps) return 2.5 * In;    // rotor resistors
+      return 6 * In;
+    }
+    var W = +c.power || 0;
+    if (!W) return 0;
+    var t = SL.terminals(c), ap = t.length >= 2 ? applied(single(this.pot[key(t[0])] || 0), single(this.pot[key(t[1])] || 0)) : null;
+    return ap ? W / ap.v : 0;
+  };
+  SL.PROT_THERMAL_T = 60;   // s: an MCB or fuse at 2×In trips in about 20 s
+  SL.RELAY_THERMAL_T = 200; // s: class-10 overload relay, about 4 s at 7.2×In
+
+  /**
+   * Protections with a rating: instantaneous (magnetic) trip above k·In
+   * (curve B 5, C 10, D 20; motor breaker 13; fuse gG 5, aM 12) and thermal
+   * trip that builds up with (I/In)² − 1 and cools when the load drops.
+   */
+  Sim.prototype.protections = function (doc, dt) {
+    var self = this, rated = doc.comps.filter(function (c) { return c.rating > 0; });
+    var anyPower = doc.comps.some(function (c) { return c.power > 0; });
+    if (!rated.length || !anyPower) { this.cur = null; return; }
+    var cur = this.cur = this.deviceCurrents(doc);
+    rated.forEach(function (c) {
+      var st = self.s(c.id), I = cur[c.id] || 0, r = I / c.rating;
+      if (c.kind === "ThermalRelay3") return; // handled with the motor heat model
+      if (!(isOvercurrent(c.kind)) || !self.closed(c, self.drivers(doc))) return;
+      var k = /^Auto/.test(c.kind) ? ({ B: 5, C: 10, D: 20 }[c.curve || "C"] || 10) : /^Breaker/.test(c.kind) ? 13 : (c.curve === "aM" ? 12 : 5);
+      if (r >= k) { st.oh = 0; self.tripDevice(doc, c, "sobreintensitat de " + I.toFixed(1) + " A, dispar instantani"); return; }
+      var T = /^Breaker/.test(c.kind) ? SL.RELAY_THERMAL_T : SL.PROT_THERMAL_T;
+      if (c.curve === "aM" && !/^Auto|^Breaker/.test(c.kind)) T = Infinity; // aM: only short-circuit protection
+      st.oh = r > 1.05 ? (st.oh || 0) + dt * (r * r - 1) / T : Math.max(0, (st.oh || 0) - dt / 30);
+      if (st.oh >= 1) { st.oh = 0; self.tripDevice(doc, c, "sobrecàrrega de " + I.toFixed(1) + " A amb calibre " + c.rating + " A"); }
+    });
   };
 
   /** Replace a blown fuse (click during simulation). */
@@ -906,7 +1068,7 @@
   };
 
   // ---------------------------------------------------------------- probe (polímetre)
-  var POT_NAMES = [[P.L1, "L1"], [P.L2, "L2"], [P.L3, "L3"], [P.N, "N"], [P.PE, "PE"], [P.POS, "+"], [P.NEG, "−"]];
+  var POT_NAMES = [[P.L1, "L1"], [P.L2, "L2"], [P.L3, "L3"], [P.N, "N"], [P.PE, "PE"], [P.POS, "+"], [P.NEG, "−"], [P.LV, "24~"], [P.LVN, "0~"]];
   /** "L1", "N", "+"... or "sense tensió" for a potential mask. */
   SL.potName = function (m) {
     if (!m) return "sense tensió";
@@ -917,8 +1079,10 @@
     var a = single(ma), b = single(mb), dc = function (p) { return p === P.POS || p === P.NEG; };
     if (!a || !b) return "0 V (" + (!a && !b ? "cap punt amb tensió" : "un punt sense tensió") + ")";
     if (a === b) return "0 V";
-    if (dc(a) && dc(b)) return "24 V CC";
+    var ap = applied(a, b);
+    if (ap) return ap.v + " V " + (ap.ac ? "CA" : "CC");
     if (dc(a) || dc(b)) return "— (CC i CA no comparables)";
+    if (a === P.LV || a === P.LVN || b === P.LV || b === P.LVN) return "— (circuit de 24 V CA aïllat)";
     if (isPhase(a) && isPhase(b)) return "400 V CA";
     if ((a === P.N && b === P.PE) || (a === P.PE && b === P.N)) return "0 V";
     return "230 V CA";
@@ -974,54 +1138,107 @@
    * energised load, the shortest path to the source through conductors and
    * closed elements.
    */
-  Sim.prototype.currentFlow = function (doc) {
-    var self = this, topo = SL.topoFor(doc), drivers = this.drivers(doc);
-    var loads = [];
-    doc.comps.forEach(function (c) {
+  /** Loads drawing current right now. */
+  Sim.prototype.activeLoads = function (doc) {
+    var self = this;
+    return doc.comps.filter(function (c) {
       var K = SL.KINDS[c.kind], st = self.s(c.id);
-      if (K.role === "Load" && (st.energized || st.motor)) loads.push(c);
+      return K.role === "Load" && (st.energized || st.motor);
     });
+  };
+
+  /** Graph of conductor stretches and closed elements (cached while nothing changes). */
+  Sim.prototype.flowGraph = function (doc) {
+    var self = this, topo = SL.topoFor(doc), loads = this.activeLoads(doc);
     var sig = loads.map(function (c) { return c.id; }).join(",") + "|" + Object.keys(this.pot).map(function (k) { return self.pot[k]; }).join("");
-    if (this._flow && this._flow.sig === sig) return this._flow.segs;
-    var adj = {};
-    function link(ka, kb, seg) { (adj[ka] = adj[ka] || []).push({ to: kb, seg: seg }); (adj[kb] = adj[kb] || []).push({ to: ka, seg: seg }); }
-    wireSegments(doc, topo).forEach(function (sg) { link(sg.ka, sg.kb, sg); });
-    var sources = {};
+    if (this._graph && this._graph.sig === sig && this._graph.topo === topo) return this._graph;
+    var drivers = this.drivers(doc), adj = {}, sources = {};
+    function link(ka, kb, e) {
+      (adj[ka] = adj[ka] || []).push(Object.assign({ to: kb }, e));
+      (adj[kb] = adj[kb] || []).push(Object.assign({ to: ka }, e));
+    }
+    wireSegments(doc, topo).forEach(function (sg) { link(sg.ka, sg.kb, { seg: sg }); });
     doc.comps.forEach(function (c) {
       var K = SL.KINDS[c.kind], ts = SL.terminals(c);
-      if (K.role === "Feed") ts.forEach(function (p) { sources[key(p)] = true; });
-      else if (K.role === "Converter" || K.role === "Logic") ts.forEach(function (p) { sources[key(p)] = true; });
-      else self.conductPairs(doc, c, drivers).forEach(function (pr) { link(key(ts[pr[0]]), key(ts[pr[1]]), null); });
+      if (K.role === "Feed" || K.role === "Converter" || K.role === "Logic") ts.forEach(function (p) { sources[key(p)] = true; });
+      else self.conductPairs(doc, c, drivers).forEach(function (pr, i) { link(key(ts[pr[0]]), key(ts[pr[1]]), { comp: c.id, pair: i }); });
     });
+    this._graph = { sig: sig, topo: topo, adj: adj, sources: sources, loads: loads };
+    return this._graph;
+  };
+
+  /** Shortest path from a load terminal to a source with the same potential: list of {from, to, seg|comp} from source side. */
+  Sim.prototype.tracePath = function (graph, k0, bit) {
+    var self = this, prev = {}, q = [k0], seen = {}, found = null;
+    seen[k0] = true;
+    while (q.length && !found) {
+      var cur = q.shift();
+      if (graph.sources[cur] && cur !== k0) { found = cur; break; }
+      (graph.adj[cur] || []).forEach(function (e) {
+        if (seen[e.to] || single(self.pot[e.to] || 0) !== bit) return;
+        seen[e.to] = true; prev[e.to] = { from: cur, e: e }; q.push(e.to);
+      });
+    }
+    var path = [];
+    for (var k = found; k && prev[k]; k = prev[k].from) path.push({ near: k, far: prev[k].from, e: prev[k].e });
+    return path; // "near" is the source side of each step
+  };
+
+  /**
+   * Conductor stretches that carry current right now, each oriented in the
+   * direction of the current: from the source to the load on phases and "+",
+   * back from the load to the source on N and "−". Found by tracing, for every
+   * energised load, the shortest path to the source through conductors and
+   * closed elements.
+   */
+  Sim.prototype.currentFlow = function (doc) {
+    var self = this, graph = this.flowGraph(doc);
+    if (graph.segs) return graph.segs;
     var out = [], used = {};
-    loads.forEach(function (c) {
+    graph.loads.forEach(function (c) {
       var pe = peTerminal(c.kind);
       SL.terminals(c).forEach(function (p, ti) {
-        var k0 = key(p), m = self.pot[k0] || 0, bit = single(m);
+        var k0 = key(p), bit = single(self.pot[k0] || 0);
         if (ti === pe || !bit || bit === P.PE) return;
-        var supply = bit !== P.N && bit !== P.NEG;
-        // breadth-first search towards a source with the same potential
-        var prev = {}, q = [k0], seen = {}, found = null;
-        seen[k0] = true;
-        while (q.length && !found) {
-          var cur = q.shift();
-          if (sources[cur] && cur !== k0) { found = cur; break; }
-          (adj[cur] || []).forEach(function (e) {
-            if (seen[e.to] || single(self.pot[e.to] || 0) !== bit) return;
-            seen[e.to] = true; prev[e.to] = { from: cur, seg: e.seg }; q.push(e.to);
-          });
-        }
-        for (var k = found; k && prev[k]; k = prev[k].from) {
-          var e = prev[k], sg = e.seg;
-          if (!sg || used[sg.ka + "|" + sg.kb]) continue;
+        var supply = bit !== P.N && bit !== P.NEG && bit !== P.LVN;
+        self.tracePath(graph, k0, bit).forEach(function (st) {
+          var sg = st.e.seg;
+          if (!sg || used[sg.ka + "|" + sg.kb]) return;
           used[sg.ka + "|" + sg.kb] = true;
-          // e.from is nearer the load, k nearer the source
-          var towardsLoad = sg.ka === k ? [sg.a, sg.b] : [sg.b, sg.a];
+          var towardsLoad = sg.ka === st.near ? [sg.a, sg.b] : [sg.b, sg.a];
           out.push({ w: sg.w, from: supply ? towardsLoad[0] : towardsLoad[1], to: supply ? towardsLoad[1] : towardsLoad[0], pot: bit });
-        }
+        });
       });
     });
-    this._flow = { sig: sig, segs: out };
+    graph.segs = out;
+    return out;
+  };
+
+  /**
+   * Current through each element (A): every load's current is added to the
+   * elements on its path to the source, pole by pole; an element's current is
+   * that of its most loaded pole. Only phases / "+" / 24 V live side are traced.
+   */
+  Sim.prototype.deviceCurrents = function (doc) {
+    var self = this, graph = this.flowGraph(doc), perPole = {}, out = {};
+    graph.loads.forEach(function (c) {
+      var I = self.loadCurrent(c);
+      if (!I) return;
+      var pe = peTerminal(c.kind);
+      SL.terminals(c).forEach(function (p, ti) {
+        var k0 = key(p), bit = single(self.pot[k0] || 0);
+        if (ti === pe || !bit || bit === P.PE || bit === P.N || bit === P.NEG || bit === P.LVN) return;
+        self.tracePath(graph, k0, bit).forEach(function (st) {
+          if (st.e.comp == null) return;
+          var k = st.e.comp + ":" + st.e.pair;
+          perPole[k] = (perPole[k] || 0) + I;
+        });
+      });
+    });
+    Object.keys(perPole).forEach(function (k) {
+      var id = +k.split(":")[0];
+      out[id] = Math.max(out[id] || 0, perPole[k]);
+    });
     return out;
   };
 

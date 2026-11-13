@@ -94,7 +94,12 @@
         vis.pos = st.pos || 0;
         if (st.blown) { vis.blown = true; extra = "fos"; }
         else if (st.tripped && !st.act) extra = "disparat";
-        if (K.role === "Logic") {
+        else if (c.rating > 0 && sim.cur) extra = (sim.cur[c.id] || 0).toFixed(1) + " A / " + c.rating + " A";
+        if (K.role === "Logo") {
+          vis.powered = st.powered; vis.inp = st.inp; vis.q = st.q; vis.burnt = st.burnt;
+          color = st.powered ? C.RED : C.GRAY;
+          extra = st.burnt ? "avariat" : st.powered ? "RUN" : "STOP";
+        } else if (K.role === "Logic") {
           vis.ins = st.cur || []; vis.outs = st.lo || []; vis.val = st.val || 0;
           color = vis.outs.some(Boolean) && !/^Logic7/.test(c.kind) ? C.RED : C.GRAY;
           if (c.kind === "LogicCnt" || c.kind === "LogicCntUD") extra = (st.cnt || 0) + " / " + Math.max(1, c.count_preset | 0 || 3);
@@ -122,11 +127,14 @@
               parts.push(Math.min(100, pct) + " %");
               if (c.kind === "Motor3WR" && st.steps) parts.push("R: " + st.steps + (st.steps === 1 ? " graó" : " graons"));
               if (c.kind === "Motor3Dahl") parts.push(st.conn === 2 ? "alta" : "baixa");
+              if (c.power) parts.push(sim.loadCurrent(c).toFixed(1) + " A");
               extra = parts.join(" · ") || null;
             }
           }
           if (c.kind === "Counter") {
             extra = (st.count || 0) + " / " + Math.max(1, c.count_preset | 0 || 3);
+          } else if (c.kind === "TimeSwitch" && c.ts_mode === "clock") {
+            extra = "🕒 " + SL.fmtClock(SL.clockOf(c, sim.time)) + (st.energized ? (st.phaseOn ? " · ON" : " · OFF") : "");
           } else if (c.kind === "TimeSwitch") {
             if (st.energized) {
               var tOn = SL.presetSecs(c), per = tOn + SL.offSecs(c), ph = per > 0 ? st.t % per : 0;

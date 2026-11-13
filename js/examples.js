@@ -170,4 +170,37 @@
     d.title.number = "3";
     return d;
   };
+
+  /** Start/stop with latching programmed on a LOGO! (SR flip-flop): S1 -> I1, S0 (NC) -> I2, Q1 -> KM1. */
+  SL.exampleLogoDoc = function () {
+    var d = SL.newDoc(), W = function (a, b) { SL.addWire(d, a, b); };
+    SL.makeComp(d, "FeedLN", 90, 60, 0, "");                 // L (90,90)  N (120,90)
+    SL.makeComp(d, "Logo230", 300, 300, 0, "-A1");           // L1 300, N 330, I1 360, I2 390 (y 300); Q1 300/330 (y 450)
+    add(d, "PushNO", 360, 180, 0, "-S1");                    // (360,180)-(360,240)
+    add(d, "PushNC", 390, 180, 0, "-S0");                    // (390,180)-(390,240)
+    add(d, "Coil", 330, 480, 0, "-KM1");                     // (330,480)-(330,540)
+    // L: bus at y 150 to L1, S1, S0; down the left side to Q1 terminal 1
+    W([90, 90], [90, 150]); W([90, 150], [390, 150]);
+    W([300, 150], [300, 300]); W([360, 150], [360, 180]); W([390, 150], [390, 180]);
+    W([360, 240], [360, 300]); W([390, 240], [390, 300]);
+    W([90, 150], [90, 510]); W([90, 510], [300, 510]); W([300, 510], [300, 450]);
+    W([330, 450], [330, 480]);
+    // N: to the module and to the coil
+    W([120, 90], [120, 120]); W([120, 120], [330, 120]); W([330, 120], [330, 300]);
+    W([120, 120], [120, 570]); W([120, 570], [330, 570]); W([330, 570], [330, 540]);
+    // program (function block diagram): I1 -> S, NOT I2 -> R, SR -> Q1
+    SL.makeComp(d, "LogoI", 630, 300, 0, "I1");              // out (675,300)
+    SL.makeComp(d, "LogoI", 630, 375, 0, "I2");              // out (675,375)
+    SL.makeComp(d, "LogicNot", 705, 375, 0, "");             // in (705,375) out (765,375)
+    SL.makeComp(d, "LogicSR", 810, 300, 0, "");              // S (810,300) R (810,330) Q (870,300)
+    SL.makeComp(d, "LogoQ", 900, 300, 0, "Q1");              // in (900,300)
+    W([675, 300], [810, 300]); W([675, 375], [705, 375]);
+    W([765, 375], [780, 375]); W([780, 375], [780, 330]); W([780, 330], [810, 330]);
+    W([870, 300], [900, 300]);
+    d.texts.push({ id: SL.newId(d), x: 165, y: 66, text: "LOGO!: marxa i aturada amb autoretenció", size: 18, color: [0, 0, 0] });
+    d.texts.push({ id: SL.newId(d), x: 630, y: 250, text: "Programa (diagrama de blocs)", size: 13, color: [0, 0, 160] });
+    d.title.title = "Marxa-aturada amb LOGO!";
+    d.title.number = "4";
+    return d;
+  };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);

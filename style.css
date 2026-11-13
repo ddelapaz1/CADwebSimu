@@ -631,3 +631,4 @@ html, body { background: var(--panel); color: var(--text); }
 #props details.info li { margin: 2px 0; }
 #props details.info p.sim { background: var(--btn-hover); border-radius: 6px; padding: 6px 8px; }
 #props.wide { width: 300px; }
+#props select { width: 100%; font: inherit; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--btn); color: var(--text); }

@@ -308,6 +308,24 @@
   I.LogicPreset = { what: "Preselector (roda de dígits): permet triar un número de 0 a 9 i el dona en BCD (1-2-4-8).", specs: ["S'usa per introduir consignes en circuits lògics."],
     how: "Cada clic augmenta el dígit; el valor es desa amb l'esquema.", sim: LOGIC_INTRO };
 
+  // ---------------------------------------------------------------- LOGO! (Siemens)
+  I.Logo230 = { what: "Mòdul lògic Siemens LOGO! 230RCE: petit autòmat programable que substitueix relés, temporitzadors i comptadors.",
+    specs: ["Alimentació 115/230 V CA (L1-N); entrades I1-I8 a 230 V CA.", "Sortides Q1-Q4 de relé (contactes lliures de potencial, uns 10 A).", "Programació amb blocs (FBD) o contactes (LAD) amb LOGO!Soft Comfort o al mateix display."],
+    how: "El programa llegeix les entrades I, calcula les funcions (AND, OR, temporitzadors, comptadors, biestables…) i actua els relés de sortida Q, cicle rere cicle.",
+    sim: "El programa es dibuixa al mateix esquema amb els blocs «Entrada I», «Sortida Q» i els blocs de lògica. Funciona només amb el mòdul alimentat (RUN); els LED i el display mostren l'estat de I i Q." };
+  I.Logo24 = { what: "Mòdul lògic Siemens LOGO! 24RCE: versió alimentada a 24 V CC.",
+    specs: ["Alimentació L+ / M a 24 V CC; entrades I1-I8 a 24 V CC.", "Sortides Q1-Q4 de relé.", "Molt habitual amb fonts d'alimentació de 24 V als quadres."],
+    how: "Igual que el 230RCE, però amb el circuit de maniobra a 24 V CC.",
+    sim: "Si l'alimenteu a 230 V queda avariat. Les entrades s'activen amb «+»." };
+  I.LogoI = { what: "Bloc d'entrada del programa LOGO!: llegeix l'estat d'una entrada física (I1…I8).",
+    specs: ["El nom del bloc (I1, I2…) indica quina entrada llegeix.", "Si hi ha més d'un LOGO!, indiqueu-ne el mòdul a les propietats."],
+    how: "La sortida del bloc és 1 quan l'entrada física té tensió.", sim: "Es connecta amb conductors als blocs de lògica del programa." };
+  I.LogoQ = { what: "Bloc de sortida del programa LOGO!: governa un relé de sortida (Q1…Q4).",
+    specs: ["El nom del bloc (Q1…Q4) indica quin relé actua.", "La seva sortida dona l'estat de Q, útil per realimentar el programa."],
+    how: "Quan l'entrada del bloc és 1, el relé Q del mòdul tanca el seu contacte entre els borns 1 i 2.", sim: "Només actua amb el mòdul en RUN." };
+  I.LogoHi = { what: "Constant «hi» (nivell 1) del programa LOGO!.", specs: ["Per deixar fixa a 1 una entrada d'un bloc."], how: "La sortida sempre és 1 (amb el mòdul en RUN).", sim: "Bloc del programa LOGO!." };
+  I.LogoLo = { what: "Constant «lo» (nivell 0) del programa LOGO!.", specs: ["Per deixar fixa a 0 una entrada d'un bloc."], how: "La sortida sempre és 0.", sim: "Bloc del programa LOGO!." };
+
   // ---------------------------------------------------------------- connections
   I.Terminal = { what: "Born de connexió (regleta): punt de connexió entre el quadre i els elements exteriors.",
     specs: ["Es numeren i s'agrupen en regletes (-X1, -X2...).", "Facilita el cablejat i el manteniment."], how: "Uneix dos conductors.", sim: "Es comporta com un conductor." };
