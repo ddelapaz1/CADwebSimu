@@ -4,6 +4,7 @@
 "use strict";
 (function (SL) {
   var A = SL.app, C = SL.COLORS;
+  SL.CONTACT_MOVE = 0.05; // s for a contact blade to open or close completely
   function key(p) { return p[0] + "," + p[1]; }
 
   /** Paint a tab's document. opts: {grid, sel:Set, dx, dy} */
@@ -162,13 +163,13 @@
         } else if (K.coil && stv.on && SL.baseSymbol(c.kind).terms.length === 2) {
           vis.halo = { c: [0, 30], r: 24, color: "rgba(255,70,70,0.35)" };
         }
-        // contacts move over about 0.12 s instead of jumping
+        // contacts travel at a constant speed: a full opening or closing takes SL.CONTACT_MOVE seconds
         if (opts.time != null && (K.role === "Contact" || K.role === "Poles" || K.role === "Manual" || K.role === "Actuator")) {
           var an = A.anim || (A.anim = {}), target = vis.closed ? 1 : 0, cur = an[c.id];
           if (!cur) cur = an[c.id] = { v: target, t: opts.time };
-          var step = Math.min(1, (opts.time - cur.t) / 0.12);
-          cur.v = cur.v + (target - cur.v) * step; cur.t = opts.time;
-          if (Math.abs(cur.v - target) < 0.02) cur.v = target;
+          var stepv = Math.max(0, opts.time - cur.t) / SL.CONTACT_MOVE;
+          cur.v = target > cur.v ? Math.min(target, cur.v + stepv) : Math.max(target, cur.v - stepv);
+          cur.t = opts.time;
           vis.closedT = cur.v;
           if (cur.v !== target) A.needsDraw = true;
         }
