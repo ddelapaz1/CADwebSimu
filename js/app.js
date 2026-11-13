@@ -643,7 +643,8 @@
     }], ["Cancel·la", null]]);
   };
   A.about = function () {
-    dialog("Quant a " + APP, [el("div", { html: "<b>CADwebSimu</b> — versió web 1.0<br>Editor i simulador d'esquemes elèctrics de comandament i potència.<br>Els esquemes es desen com a fitxers .ecs, compatibles amb la versió per a macOS." })], [["D'acord", null]]);
+    dialog("Quant a " + APP, [el("div", { html: "<b>CADwebSimu</b> — versió web 1.0<br>Editor i simulador d'esquemes elèctrics de comandament i potència.<br>Els esquemes es desen com a fitxers .ecs, compatibles amb la versió per a macOS." +
+      (window.SL_OFFLINE ? "<br><i>Còpia per fer servir sense connexió, del " + window.SL_OFFLINE + ".</i>" : "") })], [["D'acord", null]]);
   };
 
   // ------------------------------------------------------------------ menus & bars
@@ -1060,6 +1061,7 @@
         ["Llista de materials (CSV)...", function () { A.exportBOM(); }],
         ["Llista de connexions (CSV)...", function () { A.exportNets(); }], "-",
         ["Imprimeix / desa en PDF...", function () { A.printVector(); }, "⌘P"], ["Imprimeix com a imatge...", A.print], "-",
+        ["Descarrega per fer servir sense connexió...", function () { A.downloadOffline(); }], "-",
         ["Fulls", [
           ["Afegeix un full", A.addSheet, null, !edit], ["Elimina l'últim full (si és buit)", A.removeSheet, null, !edit || SL.sheetCount(t.doc) < 2], "-"]
           .concat(Array.from({ length: SL.sheetCount(t.doc) }, function (_, k) { return ["Vés al full " + (k + 1), function () { A.goSheet(k); }]; }))],

@@ -591,4 +591,54 @@
     }).join("\n");
     A.download(A.tab().title + "-connexions.csv", new Blob(["﻿" + csv], { type: "text/csv" }));
   };
+
+  // ================================================================ single-file offline copy
+  /**
+   * Build one self-contained HTML file (styles and scripts inline) from the
+   * files this page was loaded from, and download it. It opens with a double
+   * click and works without a connection.
+   */
+  A.buildOffline = function () {
+    var base = location.href;
+    function get(url) {
+      return fetch(new URL(url, base).href, { cache: "no-cache" }).then(function (r) {
+        if (!r.ok) throw new Error(url + ": " + r.status);
+        return r.text();
+      });
+    }
+    return get("index.html").then(function (html) {
+      var css = [], js = [];
+      html.replace(/<link rel="stylesheet" href="([^"]+)">/g, function (m, href) { css.push(href); return m; });
+      html.replace(/<script src="([^"]+)"><\/script>/g, function (m, src) { js.push(src); return m; });
+      return Promise.all(css.map(get).concat(js.map(get))).then(function (texts) {
+        var cssTxt = texts.slice(0, css.length), jsTxt = texts.slice(css.length);
+        css.forEach(function (href, i) {
+          html = html.replace('<link rel="stylesheet" href="' + href + '">', function () { return "<style>\n" + cssTxt[i] + "\n</style>"; });
+        });
+        js.forEach(function (src, i) {
+          var code = jsTxt[i].replace(/<\/script/gi, "<\\/script"); // keep the inline block closed only where it should
+          html = html.replace('<script src="' + src + '"></script>', function () { return "<script>\n" + code + "\n</script>"; });
+        });
+        var stamp = new Date().toISOString().slice(0, 10);
+        html = html.replace("<head>", function () {
+          return "<head>\n<!-- CADwebSimu: còpia per fer servir sense connexió (" + stamp + "). Obriu aquest fitxer amb el navegador. -->\n" +
+            "<script>window.SL_OFFLINE = " + JSON.stringify(stamp) + ";</script>";
+        });
+        return html;
+      });
+    });
+  };
+  A.downloadOffline = function () {
+    if (window.SL_OFFLINE) {
+      A.message("Aquesta ja és una còpia sense connexió (" + window.SL_OFFLINE + "). Per obtenir-ne una de nova, obriu la versió web i torneu-la a baixar.");
+      return;
+    }
+    A.setStatus("Preparant la còpia per fer servir sense connexió…");
+    A.buildOffline().then(function (html) {
+      A.download("CADwebSimu.html", new Blob([html], { type: "text/html" }));
+      A.setStatus("Desat CADwebSimu.html (a Baixades): obriu-lo amb doble clic, funciona sense connexió.");
+    }).catch(function (e) {
+      A.message("No s'ha pogut preparar la còpia sense connexió (" + e.message + "). Aquesta opció s'ha de fer servir des de la web publicada.");
+    });
+  };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);
