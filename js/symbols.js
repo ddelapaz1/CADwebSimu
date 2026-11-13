@@ -407,6 +407,57 @@
           }
         }
         break;
+      case "Motor3Dahl": {
+        // six terminals on top: 1U 1V 1W (low speed, delta) and 2U 2V 2W (high speed, YY)
+        var dc = [75, 100], dr = 48;
+        ["1U", "1V", "1W", "2U", "2V", "2W"].forEach(function (lab, k) {
+          var x6 = 30 * k, ang = PI + (k + 0.5) * PI / 6;
+          var q = [dc[0] + dr * Math.cos(ang), dc[1] + dr * Math.sin(ang)];
+          s.l([x6, 0], [x6, 25]); s.l([x6, 25], q);
+          s.term(x6, 0, lab);
+        });
+        s.c(dc, dr, v.motor ? MOTOR_RUN_FILL : "rgb(255,255,255)");
+        s.text([75, 90], "M", 20); s.text([75, 112], "3~", 11);
+        s.text([75, 128], v.conn === 2 ? "▶▶" : v.conn === 1 ? "▶" : "", 9);
+        s.l([180, 0], [180, 100]); s.l([180, 100], [123, 100]);
+        s.term(180, 0, "PE");
+        if (v.motor) rotorMarks(s, dc, 40, v.angle || 0, v.motor);
+        break;
+      }
+      case "Motor1Cap": {
+        // main winding U1-U2, auxiliary winding Z1-Z2 with its start capacitor
+        var mc = [45, 75];
+        [["U1", 0], ["U2", 30], ["Z1", 60], ["Z2", 90]].forEach(function (tp, k) {
+          var ang = PI + (k + 0.5) * PI / 4, q = [mc[0] + 32 * Math.cos(ang), mc[1] + 32 * Math.sin(ang)];
+          s.l([tp[1], 0], [tp[1], 20]); s.l([tp[1], 20], q);
+          s.term(tp[1], 0, tp[0]);
+        });
+        s.c(mc, 32, v.motor ? "rgb(150,255,150)" : "rgb(255,255,255)");
+        s.text([45, 68], "M", 16); s.text([45, 84], "1~", 10);
+        s.l([94, 22], [106, 22]); s.l([94, 27], [106, 27]); // capacitor
+        s.l([120, 0], [120, 75]); s.l([120, 75], [77, 75]);
+        s.term(120, 0, "PE");
+        if (v.motor) rotorMarks(s, mc, 37, v.angle || 0, v.motor);
+        break;
+      }
+      case "MotorDC":
+        s.l([0, 0], [0, 35]); s.l([30, 0], [30, 35]);
+        s.c([15, 55], 24, v.motor ? "rgb(170,200,255)" : "rgb(255,255,255)");
+        s.text([15, 50], "M", 16); s.text([15, 66], "═", 10);
+        s.term(0, 0, "A1"); s.term(30, 0, "A2");
+        if (v.motor) rotorMarks(s, [15, 55], 29, v.angle || 0, v.motor);
+        break;
+      case "Motor3WR":
+        s.l([0, 0], [0, 27]); s.l([30, 0], [30, 15]); s.l([60, 0], [60, 27]);
+        s.l([90, 0], [90, 60]); s.l([90, 60], [75, 60]);
+        s.c([30, 60], 45, v.motor ? MOTOR_RUN_FILL : "rgb(255,255,255)");
+        s.c([30, 60], 33);
+        s.text([30, 50], "M", 18); s.text([30, 70], "3~", 11);
+        s.l([0, 93], [0, 120]); s.l([30, 105], [30, 120]); s.l([60, 93], [60, 120]);
+        s.term(0, 0, "U"); s.term(30, 0, "V"); s.term(60, 0, "W"); s.term(90, 0, "PE");
+        s.term(0, 120, "K"); s.term(30, 120, "L"); s.term(60, 120, "M");
+        if (v.motor) { directionArrow(s, v.motor); rotorMarks(s, [30, 60], 38, v.angle || 0, v.motor); }
+        break;
       case "Motor1":
         s.l([0, 0], [0, 41]); s.l([30, 0], [30, 41]);
         s.c([15, 60], 24, v.motor ? "rgb(150,255,150)" : null);
@@ -941,6 +992,13 @@
         s.l([0, -15], [0, 15]); s.col(LOGIC_ON);
         s.c([0, 0], 4.5, "#1a1a1a");
         break;
+      case "Continuation":
+        // continuation arrow: joins every marker with the same name (also across sheets)
+        s.l([0, 0], [0, 12]);
+        s.poly([[-10, 12], [10, 12], [10, 30], [0, 40], [-10, 30]], true, "rgb(255,255,255)");
+        s.l([-5, 22], [0, 28]); s.l([0, 28], [5, 22]);
+        s.term(0, 0, "");
+        break;
       case "Wire":
         s.l([0, 3], [0, 27]); s.l([0, 27], [24, 27]);
         s.c([0, 3], 3, "rgb(220,53,69)");
@@ -988,14 +1046,20 @@
   var ioCache = {};
   SL.logicIO = function (kind) {
     if (ioCache[kind]) return ioCache[kind];
-    var sym = SL.buildSymbol(kind, {}), io = { ins: [], outs: [] };
+    var sym = baseSym(kind), io = { ins: [], outs: [] };
     sym.tdirs.forEach(function (d, i) { if (d) (d[0] < 0 ? io.ins : io.outs).push(i); });
     return (ioCache[kind] = io);
   };
 
+  // The rest geometry of a symbol (terminals, bounding box) depends only on its kind:
+  // build it once instead of on every mouse move and simulation step.
+  var baseCache = {}, bboxCache = {};
+  function baseSym(kind) { return baseCache[kind] || (baseCache[kind] = SL.buildSymbol(kind, {})); }
+  SL.baseSymbol = baseSym;
+
   /** World-space terminals of a component. */
   SL.terminals = function (c) {
-    var sym = SL.buildSymbol(c.kind, {});
+    var sym = baseSym(c.kind);
     return sym.terms.map(function (t) {
       var p = SL.xform(t, c.rot, c.mirror);
       return [Math.round(p[0]) + c.x, Math.round(p[1]) + c.y];
@@ -1004,7 +1068,7 @@
 
   /** World-space terminals with outward unit vector: [{pos:[x,y], dir:[dx,dy]}]. */
   SL.terminalsWithDir = function (c) {
-    var sym = SL.buildSymbol(c.kind, {});
+    var sym = baseSym(c.kind);
     return sym.terms.map(function (t, i) {
       var p = SL.xform(t, c.rot, c.mirror);
       var localDir = sym.tdirs[i] ? sym.tdirs[i] : t[1] === 0 ? [0, -1] : (t[1] === 30 && t[0] < 0) ? [-1, 0] : (t[1] === 30 && t[0] > 0 && c.kind === "Rectifier") ? [1, 0] : [0, 1];
@@ -1018,7 +1082,7 @@
 
   /** World-space bounding box {x0,y0,x1,y1}. */
   SL.compRect = function (c) {
-    var bb = SL.symBBox(SL.buildSymbol(c.kind, {}));
+    var bb = bboxCache[c.kind] || (bboxCache[c.kind] = SL.symBBox(baseSym(c.kind)));
     var pts = [bb[0], bb[1], [bb[0][0], bb[1][1]], [bb[1][0], bb[0][1]]].map(function (p) {
       var q = SL.xform(p, c.rot, c.mirror); return [q[0] + c.x, q[1] + c.y];
     });

@@ -489,3 +489,24 @@ html, body { margin: 0; height: 100%; overflow: hidden; color: var(--text); back
 @media print {
   #menubar, .toolbar, #tabs, #statusbar { display: none; }
 }
+
+/* probe tooltip (simulation) */
+#probe { position: fixed; z-index: 50; pointer-events: none; white-space: pre; font-size: 12px; line-height: 1.35;
+  background: rgba(255,255,225,.97); color: #222; border: 1px solid #b8b08a; border-radius: 4px; padding: 4px 7px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.18); }
+#probe[hidden] { display: none; }
+
+/* bottom panel: timing chart and event log */
+#bpanel { height: 210px; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--panel); }
+#bpanel[hidden] { display: none; }
+#bpanel .ptabs { display: flex; gap: 4px; padding: 3px 6px; align-items: center; }
+#bpanel .ptabs button { font: inherit; padding: 2px 10px; border: 1px solid var(--border); background: var(--panel-light); border-radius: 3px; cursor: pointer; }
+#bpanel .ptabs button.on { background: #fff; font-weight: 600; }
+#bpanel .ptabs .grow { flex: 1; }
+#bpanel .pbody { flex: 1; overflow: auto; background: #fff; border-top: 1px solid var(--border); }
+#chrono { display: block; width: 100%; }
+#chrono[hidden], #loglist[hidden] { display: none; }
+#loglist { font: 12px/1.5 Menlo, Consolas, monospace; padding: 4px 8px; }
+.faultlist .row { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin: 3px 0; }
+.checklist { max-height: 50vh; overflow: auto; margin: 6px 0; padding-left: 20px; }
+.checklist li { margin: 2px 0; }

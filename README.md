@@ -27,6 +27,17 @@ Editor i simulador d'esquemes elèctrics de comandament i potència que funciona
 - Els esquemes es desen com a fitxers `.ecs`, compatibles amb la versió per a macOS, i la
   sessió es conserva al navegador.
 
+- Motors: trifàsic, estrella-triangle, Dahlander (dues velocitats), rotor bobinat amb graons de
+  resistències, monofàsic (també amb condensador) i de corrent continu; rampes d'acceleració amb
+  arrencadors i variadors. Fent clic en un motor en marxa es frena i el relé tèrmic dispara.
+- Per a classe: **mode avaries** (el professor amaga conductors tallats, contactes oberts o
+  enganxats i bobines cremades, amb contrasenya opcional; l'alumne les busca amb la **sonda**,
+  Maj+clic fixa la referència i mostra la tensió entre dos punts), **cronograma** i **registre
+  d'esdeveniments** exportable, i **Comprova l'esquema** (borns lliures, contactes sense bobina...).
+- Referències creuades sota les bobines, diversos fulls amb referències de continuació,
+  exportació vectorial (SVG i PDF des d'Imprimeix) i llista de materials en CSV.
+- So per al timbre, el brunzidor, la sirena i la botzina (es pot silenciar a Mode).
+
 ## Exemples
 - `?ejemplo=1` arrencada directa d'un motor
 - `?ejemplo=2` arrencada estrella-triangle (afegiu `&simular=1` per veure'l en marxa)

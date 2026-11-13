@@ -194,6 +194,7 @@
     rd.onerror = function () { message("No es pot obrir el fitxer"); };
     rd.readAsText(f);
   }
+  A.download = function (name, blob) { download(name, blob); };
   function download(name, blob) {
     var a = el("a", { href: URL.createObjectURL(blob), download: name });
     document.body.appendChild(a); a.click(); a.remove();
@@ -213,10 +214,10 @@
     });
   };
   function pageCanvas() {
-    var t = A.tab(), ps = SL.PAGE_SIZES[t.doc.page.size], scale = 1.5;
+    var t = A.tab(), ps = SL.PAGE_SIZES[t.doc.page.size], scale = 1.5, oy = SL.sheetY(t.doc, A.currentSheet());
     var c = document.createElement("canvas");
     c.width = Math.round(ps.w * scale); c.height = Math.round(ps.h * scale);
-    var r = new SL.Renderer(c.getContext("2d"), { zoom: scale, panX: 0, panY: 0 });
+    var r = new SL.Renderer(c.getContext("2d"), { zoom: scale, panX: 0, panY: -oy * scale });
     SL.drawDoc(r, t, { grid: false, sel: new Set(), dx: 0, dy: 0, noShadow: true });
     return c;
   }
@@ -356,13 +357,16 @@
       }
     });
     A.lastT = null;
-    setStatus("Simulació: feu clic sobre polsadors, interruptors i automàtics per accionar-los");
+    setStatus("Simulació: feu clic sobre polsadors, interruptors i automàtics per accionar-los · Maj+clic fixa la referència de la sonda");
+    var nf = (A.tab().doc.faults || []).length;
+    if (nf) setStatus("Aquest esquema té " + nf + (nf === 1 ? " avaria amagada" : " avaries amagades") + ". Mesureu amb la sonda (Maj+clic fixa la referència) i feu servir «Avaries › Indica on és l'avaria».");
     (all ? A.tabs : [A.tab()]).forEach(A.simEvents);
     faults.forEach(function (x) { A.fault(x[0], x[1]); });
     refreshAll();
   };
   A.stopSim = function () {
     var t = A.tab();
+    A.probeRef = null;
     t.mode = "edit"; t.sim = null; A.pressed = null;
     setStatus("Preparat");
     refreshAll();
@@ -407,6 +411,8 @@
       if (t === A.tab()) A.simEvents(t);
     });
     if (!any) A.lastT = null;
+    if (A.panelUpdate) A.panelUpdate();
+    if (A.soundUpdate) A.soundUpdate();
     return any;
   };
 
@@ -427,7 +433,32 @@
     v.zoom = z; v.panX = cr.w / 2 - (a[0] + b[0]) / 2 * z; v.panY = cr.h / 2 - (a[1] + b[1]) / 2 * z;
     A.redraw(); updateStatus();
   };
-  A.zoomAll = function () { var ps = SL.PAGE_SIZES[A.tab().doc.page.size]; A.zoomRect([0, 0], [ps.w, ps.h]); };
+  A.zoomAll = function () { var ps = SL.docSize(A.tab().doc); A.zoomRect([0, 0], [ps.w, ps.h]); };
+  /** Sheet (0-based) shown at the centre of the view. */
+  A.currentSheet = function () {
+    var t = A.tab(), cr = A.canvasRect(), v = t.view;
+    return SL.sheetOf(t.doc, [0, (cr.h / 2 - v.panY) / v.zoom]) - 1;
+  };
+  A.goSheet = function (k) {
+    var doc = A.tab().doc, ps = SL.PAGE_SIZES[doc.page.size], y = SL.sheetY(doc, k);
+    A.pushView(); A.zoomRect([0, y], [ps.w, y + ps.h]);
+  };
+  A.addSheet = function () {
+    var doc = A.tab().doc;
+    A.checkpoint();
+    doc.page.count = SL.sheetCount(doc) + 1;
+    A.changed(); A.goSheet(doc.page.count - 1);
+    setStatus("Full " + doc.page.count + " afegit. Uniu els circuits entre fulls amb «Referència de continuació» (barra de connexions).");
+  };
+  A.removeSheet = function () {
+    var doc = A.tab().doc, n = SL.sheetCount(doc);
+    if (n < 2) return;
+    var y0 = SL.sheetY(doc, n - 1) - SL.SHEET_GAP;
+    var used = doc.comps.some(function (c) { return SL.compRect(c).y1 > y0; }) ||
+      doc.wires.some(function (w) { return w.a[1] > y0 || w.b[1] > y0; }) || doc.texts.some(function (x) { return x.y > y0; });
+    if (used) { message("L'últim full no és buit: esborreu-ne primer el contingut."); return; }
+    A.checkpoint(); doc.page.count = n - 1; A.changed(); A.zoomAll();
+  };
   A.zoomCenter = function (f) { var cr = A.canvasRect(); A.pushView(); A.zoomAt(f, cr.w / 2, cr.h / 2); };
 
   // ------------------------------------------------------------------ dialogs
@@ -454,6 +485,7 @@
     dialog(APP, [el("div", { class: "msg" }, [el("span", { class: "warn", text: "⚠" }), el("span", { text: text })])], [["D'acord", null]]);
   }
   A.message = message;
+  A.ui = { dialog: dialog, row: row, textInput: textInput, radios: radios, check: check, close: closeDialog };
   function row(label, input) { return el("div", { class: "row" }, [el("label", { text: label }), input]); }
   function textInput(v) { var i = el("input", { type: "text" }); i.value = v || ""; return i; }
   function radios(name, options, value) {
@@ -485,10 +517,16 @@
     }
     var K = SL.KINDS[c.kind], name = textInput(c.name), func = textInput(c.func), body = [el("b", { text: K.label }), row("Nom:", name), row("Funció:", func)];
     var base, mult, color, offBase, preset;
-    if (K.timer) {
+    if (K.timer || K.ramp) {
       base = el("input", { type: "number", step: "1", min: "0", style: "width:80px" }); base.value = c.time_base;
       mult = radios("mult", [[0.1, "x 0,1 Seg"], [1, "x 1 Seg"], [10, "x 10 Seg"], [60, "x 60 Seg"]], c.time_mult);
-      body.push(el("div", {}, [el("div", { text: c.kind === "TimeSwitch" ? "Temps connectat (ON)" : "Temporització" }), el("div", { class: "radios" }, [base, mult])]));
+      body.push(el("div", {}, [el("div", { text: c.kind === "TimeSwitch" ? "Temps connectat (ON)" : K.ramp ? "Temps de rampa (acceleració i aturada del motor)" : "Temporització" }), el("div", { class: "radios" }, [base, mult])]));
+    }
+    var autoReset = null;
+    if (c.kind === "ThermalRelay3") {
+      autoReset = check("Rearmament automàtic (quan s'ha refredat)", c.auto_reset);
+      body.push(autoReset);
+      body.push(el("div", { class: "hint", text: "Dispara si el motor funciona amb dues fases (3 s) o està frenat (5 s). Durant la simulació, feu clic sobre un motor per frenar-lo." }));
     }
     if (c.kind === "TimeSwitch") {
       offBase = el("input", { type: "number", step: "1", min: "0", style: "width:80px" }); offBase.value = c.off_base == null ? 5 : c.off_base;
@@ -514,6 +552,7 @@
       c.name = name.value.trim(); c.func = func.value;
       if (base) { var b = parseFloat(String(base.value).replace(",", ".")); c.time_base = isFinite(b) && b >= 0 ? b : 5; c.time_mult = parseFloat(mult.value()) || 1; }
       if (color) c.color = color.value() || "Verde";
+      if (autoReset) c.auto_reset = autoReset.input.checked;
       if (offBase) { var ob = parseFloat(String(offBase.value).replace(",", ".")); c.off_base = isFinite(ob) && ob >= 0 ? ob : 5; }
       if (preset) { var pv = parseInt(preset.value, 10); c.count_preset = pv >= 1 ? pv : 3; }
       A.changed();
@@ -545,8 +584,10 @@
     var pg = A.tab().doc.page;
     var size = radios("size", Object.keys(SL.PAGE_SIZES).map(function (k) { return [k, SL.PAGE_SIZES[k].label]; }), pg.size);
     var b = check("Contorn", pg.border), r = check("Referències", pg.references), t = check("Caixetí", pg.title_block), s = check("Visualitza connexions símbol", pg.show_terminals);
-    dialog("Configuració", [el("div", { text: "Format" }), size, b, r, t, s], [["D'acord", function () {
+    var xr = check("Referències creuades sota les bobines", pg.xref !== false);
+    dialog("Configuració", [el("div", { text: "Format" }), size, b, r, xr, t, s], [["D'acord", function () {
       A.checkpoint();
+      pg.xref = xr.input.checked;
       pg.size = size.value() || pg.size; pg.border = b.input.checked; pg.references = r.input.checked;
       pg.title_block = t.input.checked; pg.show_terminals = s.input.checked;
       A.changed();
@@ -1003,7 +1044,12 @@
       ["Fitxer", [
         ["Nou", A.newDoc, "⌘N"], ["Obre...", A.open, "⌘O"], ["Tanca", function () { A.requestClose(A.active); }],
         ["Desa", A.save, "⌘S"], ["Anomena i desa...", A.saveAs], "-",
-        ["Exporta imatge...", A.exportImage], "-", ["Imprimeix...", A.print, "⌘P"], "-",
+        ["Exporta imatge (PNG)...", A.exportImage], ["Exporta en vectorial (SVG)...", function () { A.exportSVG(); }],
+        ["Llista de materials (CSV)...", function () { A.exportBOM(); }], "-",
+        ["Imprimeix / desa en PDF...", function () { A.printVector(); }, "⌘P"], ["Imprimeix com a imatge...", A.print], "-",
+        ["Fulls", [
+          ["Afegeix un full", A.addSheet, null, !edit], ["Elimina l'últim full (si és buit)", A.removeSheet, null, !edit || SL.sheetCount(t.doc) < 2], "-"]
+          .concat(Array.from({ length: SL.sheetCount(t.doc) }, function (_, k) { return ["Vés al full " + (k + 1), function () { A.goSheet(k); }]; }))],
         ["Configuració...", A.configDialog],
         ["Preferències...", A.prefsDialog, "⌘,"]]],
       ["Edita", [
@@ -1021,12 +1067,20 @@
         ["Punt de connexió", function () { A.setTool({ t: "junction" }); }]]],
       ["Mode", [
         ["Edició", A.stopSim], ["Simulació", function () { A.startSim(false); }, "F5"], ["Pausa", A.pause], ["Pas a pas", A.step],
-        ["Simula el document", function () { A.startSim(false); }], ["Simula tots els documents", function () { A.startSim(true); }]]],
+        ["Simula el document", function () { A.startSim(false); }], ["Simula tots els documents", function () { A.startSim(true); }], "-",
+        ["Comprova l'esquema...", function () { A.checkDoc(); }],
+        ["So dels avisadors acústics", function () { A.toggleSound(); }, null, false, !A.soundMuted]]],
+      ["Avaries", [
+        ["Afegeix una avaria a l'element seleccionat...", function () { A.faultAdd(); }, null, !edit],
+        ["Gestiona les avaries...", function () { A.faultManage(); }, null, !edit], "-",
+        ["Indica on és l'avaria (diagnòstic)", function () { A.faultDiagnose(); }]]],
       ["Visualitza", [
         ["Zoom anterior", A.zoomPrev], ["Zoom normal", function () { A.pushView(); var cr = A.canvasRect(); A.zoomAt(0.75 / A.tab().view.zoom, cr.w / 2, cr.h / 2); }],
         ["Zoom +", function () { A.zoomCenter(1.25); }], ["Zoom -", function () { A.zoomCenter(0.8); }],
         ["Zoom finestra", function () { A.setTool({ t: "zoomwin" }); }], ["Zoom tot", function () { A.pushView(); A.zoomAll(); }], "-",
-        ["Reixeta", function () { A.grid = !A.grid; renderToolbars(); A.redraw(); }, null, false, A.grid]]],
+        ["Reixeta", function () { A.grid = !A.grid; renderToolbars(); A.redraw(); }, null, false, A.grid], "-",
+        ["Cronograma", function () { A.showPanel(A.panelOpen("chrono") ? null : "chrono"); }, null, false, A.panelOpen && A.panelOpen("chrono")],
+        ["Registre d'esdeveniments", function () { A.showPanel(A.panelOpen("log") ? null : "log"); }, null, false, A.panelOpen && A.panelOpen("log")]]],
       ["Barres", [
         ["Barra d'eines", function () { A.showToolbar = !A.showToolbar; renderToolbars(); }, null, false, A.showToolbar],
         ["Barra d'estat", function () { A.showStatus = !A.showStatus; $("statusbar").hidden = !A.showStatus; }, null, false, A.showStatus],
@@ -1126,7 +1180,7 @@
     if (cmd && k === "n") A.newDoc();
     else if (cmd && k === "o") A.open();
     else if (cmd && (k === "s" || k === "g")) A.save();
-    else if (cmd && k === "p") A.print();
+    else if (cmd && k === "p") A.printVector();
     else if (cmd && k === ",") A.prefsDialog();
     else if (cmd && k === "z") { if (e.shiftKey) A.redo(); else A.undo(); }
     else if (cmd && k === "y") A.redo();
@@ -1140,7 +1194,8 @@
     else if (!cmd && k === "m") A.rotate(0, true);
     else if (!cmd && (e.key === "Delete" || e.key === "Backspace")) A.deleteSel();
     else if (e.key === "Escape") {
-      if (A.openCat || A.radialMenu) A.closeSymDeploy();
+      if (A.diagPick) { A.diagPick = false; setStatus("Diagnòstic cancel·lat"); }
+      else if (A.openCat || A.radialMenu) A.closeSymDeploy();
       else if (A.wireFrom) { A.wireFrom = null; A.redraw(); }
       else A.setTool({ t: "select" });
     }

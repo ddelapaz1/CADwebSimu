@@ -48,6 +48,9 @@
   function peTerminal(kind) {
     if (kind === "Motor3") return 3;
     if (kind === "Motor3YD") return 6;
+    if (kind === "Motor3Dahl") return 6;
+    if (kind === "Motor1Cap") return 4;
+    if (kind === "Motor3WR") return 3;
     if (kind === "Surge1N") return 2;
     if (kind === "Surge3N") return 4;
     return -1;
@@ -180,8 +183,38 @@
     return [];
   }
 
+  /** Wires removed by a hidden "cut wire" fault (fault mode). */
+  function cutWires(doc) {
+    var cut = {};
+    (doc.faults || []).forEach(function (f) { if (f.type === "cut") cut[f.id] = true; });
+    return cut;
+  }
+
+  /**
+   * Connectivity of the document, rebuilt only when its geometry changes
+   * (during a simulation the schematic is fixed, so this is built once).
+   */
+  var topoCache = typeof WeakMap !== "undefined" ? new WeakMap() : null;
+  function topoSignature(doc) {
+    var p = [];
+    doc.comps.forEach(function (c) { p.push(c.kind, c.x, c.y, c.rot | 0, c.mirror ? 1 : 0, c.name); });
+    p.push("|");
+    doc.wires.forEach(function (w) { p.push(w.id, w.a[0], w.a[1], w.b[0], w.b[1]); });
+    p.push("|", JSON.stringify(doc.junctions || []), JSON.stringify(doc.no_junctions || []), JSON.stringify(doc.faults || []));
+    return p.join(",");
+  }
+  SL.topoFor = function (doc) {
+    var sig = topoSignature(doc), hit = topoCache && topoCache.get(doc);
+    if (hit && hit.sig === sig) return hit.topo;
+    var topo = buildTopo(doc);
+    if (topoCache) topoCache.set(doc, { sig: sig, topo: topo });
+    return topo;
+  };
+
   /** Fixed connectivity: wires, T-junctions, explicit crossing junctions, and terminal positions. */
   function buildTopo(doc) {
+    var cut = cutWires(doc);
+    doc = Object.assign({}, doc, { wires: doc.wires.filter(function (w) { return !cut[w.id]; }) });
     var idx = {}, hIdx = {}, vIdx = {}, pts = [], coordList = [], coordSeen = {};
     function alloc(p) { var id = pts.length; pts.push(p); return id; }
     function addCoord(p) {
@@ -263,9 +296,26 @@
       }
     });
 
+    // continuation markers with the same name are the same conductor
+    var byName = {};
+    doc.comps.forEach(function (c) {
+      if (c.kind === "Continuation" && c.name && terms[c.id].length) (byName[c.name] = byName[c.name] || []).push(terms[c.id][0]);
+    });
+    Object.keys(byName).forEach(function (nm) { byName[nm].forEach(function (i) { d.union(byName[nm][0], i); }); });
     var base = pts.map(function (_, i) { return d.find(i); });
     return { idx: idx, coordList: coordList, pts: pts, base: base, terms: terms, wireNode: wireNode };
   }
+
+  SL.MOTOR_ACCEL = 0.6; // s to full speed, direct-on-line start
+  SL.MOTOR_DECEL = 1.0; // s to stop when the supply goes
+  /** Running speed of a motor as a fraction (drawing speed and the % shown). */
+  function motorLevel(c, st) {
+    if (c.kind === "Motor3YD") return st.conn === 1 ? 0.4 : 1;
+    if (c.kind === "Motor3Dahl") return st.conn === 1 ? 0.45 : 0.9;
+    if (c.kind === "Motor3WR") return 0.8 / (1 + (st.steps || 0) * 0.8);
+    return 0.75;
+  }
+  SL.motorLevel = motorLevel;
 
   function Sim(doc) {
     this.st = {};
@@ -274,6 +324,8 @@
     this.fault = null;
     this.time = 0;
     this.events = [];    // messages for the status bar (trips, blown fuses)
+    this.log = [];       // event log: { t, text }
+    this.sig = {};       // timing chart: id -> { label, changes: [[t, value]] }
     this.forceOpen = {}; // ids treated as open while looking for the device that clears a fault
     var self = this;
     doc.comps.forEach(function (c) {
@@ -284,19 +336,28 @@
     });
   }
 
+  /** Hidden fault on element/wire `id` (fault mode): "open", "stuck", "cut" or undefined. */
+  Sim.prototype.flt = function (doc, id) {
+    if (!this.fltMap || this.fltDoc !== doc.faults) {
+      this.fltDoc = doc.faults;
+      this.fltMap = {};
+      var m = this.fltMap;
+      (doc.faults || []).forEach(function (f) { m[f.id] = f.type; });
+    }
+    return this.fltMap[id];
+  };
+
   Sim.prototype.s = function (id) {
     return this.st[id] || (this.st[id] = { energized: false, on: false, t: 0, act: false, motor: 0, conn: 0, angle: 0, prev: false });
   };
 
   Sim.prototype.drivers = function (doc) {
+    this.doc = doc;
     var m = {}, self = this;
     doc.comps.forEach(function (c) {
       if (!c.name) return;
       var st = self.s(c.id), on = null;
-      if (["Coil", "LatchCoil", "StepRelay", "Solenoid", "TimerOn", "TimerOff", "TimerOnOff", "Flasher",
-        "PulseGen", "TimeSwitch", "Counter", "SoftCtrl", "SoftRevCtrl", "VfdACCtrl", "DriveDCCtrl",
-        "SsrDC", "SsrAC", "PhaseLossN", "PhaseLoss", "PhaseSeqN", "PhaseSeq",
-        "CoilContactNO", "CoilContactCO"].indexOf(c.kind) >= 0) on = st.on;
+      if (SL.KINDS[c.kind].coil) on = st.on;
       else if (c.kind === "ThermalRelay3") on = st.act;
       if (on !== null) m[c.name] = !!(m[c.name] || on);
     });
@@ -306,6 +367,9 @@
   Sim.prototype.closed = function (c, drivers) {
     var st = this.s(c.id), K = SL.KINDS[c.kind];
     if (this.forceOpen[c.id]) return false;
+    var f = this.doc ? this.flt(this.doc, c.id) : null;
+    if (f === "open") return false;
+    if (f === "stuck") return true;
     switch (K.role) {
       case "Passive": return !st.blown;
       case "Manual": return st.act;
@@ -340,6 +404,7 @@
         return;
       }
       if (["Passive", "Manual", "Poles", "Contact", "Actuator"].indexOf(K.role) < 0) return;
+      if (self.flt(doc, c.id) === "open") return; // fault: the element does not conduct at all
       var isClosed = self.closed(c, drivers);
       if (c.kind === "CrossSw") {
         if (t.length >= 4) {
@@ -464,7 +529,7 @@
   Sim.prototype.tick = function (doc, dt) {
     if (this.fault) return this.fault;
     this.time += dt;
-    var topo = buildTopo(doc), self = this;
+    var topo = SL.topoFor(doc), self = this;
     doc.comps.forEach(function (c) {
       var st = self.s(c.id), preset = SL.presetSecs(c);
       if (c.kind === "TimerOn") {
@@ -490,9 +555,14 @@
         else { st.t = 0; st.on = false; }
       }
       if (SL.KINDS[c.kind].role === "Logic") logicTime(c, st, dt);
-      if (st.motor) {
-        var speed = c.kind === "Motor3YD" ? (st.conn === 1 ? 3 : 8) : 6;
-        st.angle += dt * speed * st.motor;
+      if (SL.KINDS[c.kind].motor) {
+        // mechanical speed (0..1 of the element's level) follows a ramp; a braked motor stays still
+        var target = st.motor && !st.blocked ? motorLevel(c, st) : 0, spd = st.spd || 0;
+        var up = st.rampT || SL.MOTOR_ACCEL, down = st.rampT || SL.MOTOR_DECEL;
+        spd = spd < target ? Math.min(target, spd + dt / up) : Math.max(target, spd - dt / down);
+        st.spd = spd;
+        if (st.motor) st.dir = st.motor;
+        st.angle += dt * 8 * (st.dir || 1) * spd;
       }
     });
     var toggled = {}, counted = {}, edged = {}, ilk = interlockPairs(doc), r = null;
@@ -522,6 +592,7 @@
         if (SL.KINDS[c.kind].role !== "Load") return;
         var t = topo.terms[c.id];
         var pots = t.map(function (j) { return single(r.out[j]); });
+        if (self.flt(doc, c.id) === "open") pots = pots.map(function () { return 0; }); // burnt coil / open winding
         var st = self.s(c.id);
         if (c.kind === "Motor3") {
           var dir = orderDir(pots[0], pots[1], pots[2]);
@@ -535,6 +606,35 @@
         } else if (c.kind === "Motor1") {
           var e1 = pots.length === 2 && validPair(pots[0], pots[1]);
           st.energized = e1; st.motor = e1 ? 1 : 0;
+        } else if (c.kind === "Motor3Dahl") {
+          // low speed: 1U 1V 1W fed (delta), 2U 2V 2W free; high speed: 2U 2V 2W fed and 1U 1V 1W joined (YY)
+          var lowD = orderDir(pots[0], pots[1], pots[2]), hiD = orderDir(pots[3], pots[4], pots[5]);
+          var anyLow = pots.slice(0, 3).some(Boolean), anyHi = pots.slice(3, 6).some(Boolean);
+          var joined = r.roots[t[0]] === r.roots[t[1]] && r.roots[t[1]] === r.roots[t[2]];
+          st.motor = 0; st.conn = 0;
+          if (lowD && !anyHi) { st.motor = lowD; st.conn = 1; }
+          else if (hiD && joined && !anyLow) { st.motor = hiD; st.conn = 2; }
+          st.energized = st.motor !== 0;
+          st.twoPhase = !st.motor && (anyLow || anyHi); // wrong or incomplete connection: it hums
+        } else if (c.kind === "Motor1Cap") {
+          // main winding U1-U2 and auxiliary Z1-Z2: swapping Z1/Z2 reverses it; without Z it hums
+          var mainW = validPair(pots[0], pots[1]), auxW = validPair(pots[2], pots[3]);
+          st.motor = mainW && auxW ? (pots[2] === pots[1] ? -1 : 1) : 0;
+          st.energized = st.motor !== 0;
+          st.twoPhase = mainW && !auxW;
+        } else if (c.kind === "MotorDC") {
+          // the polarity of the armature sets the direction; AC does not turn it
+          st.motor = pots[0] === P.POS && pots[1] === P.NEG ? 1 : pots[0] === P.NEG && pots[1] === P.POS ? -1 : 0;
+          st.energized = st.motor !== 0;
+        } else if (c.kind === "Motor3WR") {
+          // stator U V W; rotor K L M must be closed (directly or through the starting resistors)
+          var dWR = orderDir(pots[0], pots[1], pots[2]);
+          var rotorClosed = t.length >= 7 && r.roots[t[4]] === r.roots[t[5]] && r.roots[t[5]] === r.roots[t[6]];
+          st.motor = rotorClosed ? dWR : 0;
+          st.rotorOpen = dWR !== 0 && !rotorClosed;
+          st.energized = st.motor !== 0;
+          var phWR = pots.slice(0, 3).filter(isPhase);
+          st.twoPhase = dWR === 0 && phWR.length === 2 && phWR[0] !== phWR[1];
         } else if (c.kind === "SsrDC" || c.kind === "SsrAC") {
           var eSsr = pots.length >= 4 && validPair(pots[2], pots[3]);
           st.energized = eSsr;
@@ -588,29 +688,138 @@
     }
     doc.comps.forEach(function (c) { var st = self.s(c.id); st.prev = st.energized; if (st.cur) st.li = st.cur.slice(); });
     this.thermalOverload(doc, topo, r, dt);
+    this.record(doc);
     return null;
   };
 
+  /** Status-bar message that also goes to the event log. */
+  Sim.prototype.note = function (text) {
+    this.events.push(text);
+    this.log.push({ t: this.time, text: text });
+    if (this.log.length > 5000) this.log.splice(0, 1000);
+  };
+
+  /**
+   * Value of the signal shown for an element in the log and the timing chart,
+   * with the words for its two states; null for elements that are not tracked.
+   */
+  Sim.prototype.signal = function (doc, c) {
+    var K = SL.KINDS[c.kind], st = this.s(c.id);
+    if (!c.name && K.role !== "Logic") return null;
+    if (/^Motor/.test(c.kind)) return { v: st.motor ? 1 : 0, on: st.motor < 0 ? "arrenca (gir antihorari)" : "arrenca", off: "s'atura" };
+    if (c.kind === "ThermalRelay3") return { v: st.act ? 1 : 0, on: "ha disparat", off: "rearmat" };
+    if (K.role === "Load") {
+      if (K.coil || c.kind === "LatchCoil" || c.kind === "StepRelay" || c.kind === "Solenoid")
+        return { v: st.on ? 1 : 0, on: "s'excita (actua)", off: "es desexcita" };
+      return { v: st.energized || st.on ? 1 : 0, on: "s'encén / sona", off: "s'apaga" };
+    }
+    if (K.role === "Actuator") return { v: st.act ? 1 : 0, on: K.click === "momentary" ? "premut" : "accionat", off: K.click === "momentary" ? "deixat anar" : "en repòs" };
+    if (K.role === "Manual") return { v: st.act ? 1 : 0, on: "tancat", off: "obert" };
+    if (K.role === "Logic" && c.name) {
+      var lo = st.lo || [], cur = st.cur || [];
+      var v = lo.length ? (lo[0] ? 1 : 0) : (cur[0] ? 1 : 0);
+      return { v: v, on: "= 1", off: "= 0" };
+    }
+    return null;
+  };
+
+  /** Record state changes for the event log and the timing chart. */
+  Sim.prototype.record = function (doc) {
+    var self = this, batch = [];
+    // within one step, list causes before effects: controls, protections, coils, signals, motors
+    var rank = function (c) {
+      var K = SL.KINDS[c.kind];
+      return K.role === "Actuator" || K.role === "Manual" ? 0 : c.kind === "ThermalRelay3" ? 1 : K.motor ? 4 : K.coil ? 2 : 3;
+    };
+    doc.comps.forEach(function (c) {
+      var sg = self.signal(doc, c);
+      if (!sg) return;
+      var rec = self.sig[c.id];
+      if (!rec) {
+        self.sig[c.id] = { label: c.name || SL.KINDS[c.kind].label, kind: c.kind, changes: [[self.time, sg.v]] };
+        return;
+      }
+      var last = rec.changes[rec.changes.length - 1][1];
+      if (last === sg.v) return;
+      rec.changes.push([self.time, sg.v]);
+      if (rec.changes.length > 4000) rec.changes.splice(0, 1000);
+      batch.push({ r: rank(c), e: { t: self.time, text: rec.label + " " + (sg.v ? sg.on : sg.off) } });
+    });
+    batch.sort(function (a, b) { return a.r - b.r; }).forEach(function (x) { self.log.push(x.e); });
+    if (self.log.length > 5000) self.log.splice(0, 1000);
+  };
+
   /** Overload relays carrying a single-phasing motor trip after TRIP_TIME_THERMAL. */
+  SL.TRIP_TIME_BLOCKED = 5;  // s for a stalled (braked) motor
+  SL.THERMAL_COOL = 20;      // s to cool down completely
+
+  /**
+   * Overload relays: they heat up while they carry a motor that runs on two
+   * phases (trip in TRIP_TIME_THERMAL) or is braked (TRIP_TIME_BLOCKED), and
+   * cool down otherwise; with automatic reset they close again once cool.
+   * Also: speed ramps of motors fed through starters/drives, and the
+   * resistor steps of wound-rotor motors.
+   */
   Sim.prototype.thermalOverload = function (doc, topo, r, dt) {
     if (!r) return;
-    var self = this, hum = {};
+    var self = this, heat = {}, why = {};
+    var rootsOf = function (c) { return topo.terms[c.id].map(function (j) { return r.roots[j]; }); };
     doc.comps.forEach(function (c) {
-      if (c.kind === "Motor3" && self.s(c.id).twoPhase) topo.terms[c.id].forEach(function (j) { hum[r.roots[j]] = true; });
+      if (!SL.KINDS[c.kind].motor) return;
+      var st = self.s(c.id), rate = 0, reason = "";
+      if (st.twoPhase) { rate = 1 / SL.TRIP_TIME_THERMAL; reason = "motor funcionant amb dues fases o mal connectat"; }
+      else if (st.blocked && st.motor) { rate = 1 / SL.TRIP_TIME_BLOCKED; reason = "sobrecàrrega: motor frenat"; }
+      if (rate) rootsOf(c).forEach(function (k) { if (!heat[k] || heat[k] < rate) { heat[k] = rate; why[k] = reason; } });
+      // ramp: a starter or drive with a terminal on the motor's circuit sets the ramp time
+      var mr = rootsOf(c), ramp = null;
+      doc.comps.forEach(function (o) {
+        if (SL.KINDS[o.kind].ramp && rootsOf(o).some(function (k) { return mr.indexOf(k) >= 0; })) ramp = Math.max(0.1, SL.presetSecs(o));
+      });
+      st.rampT = ramp;
+      if (c.kind === "Motor3WR") st.steps = st.motor ? self.rotorSteps(doc, topo, c) : 0;
     });
     doc.comps.forEach(function (c) {
       if (c.kind !== "ThermalRelay3") return;
-      var st = self.s(c.id);
-      if (st.act) { st.ot = 0; return; }
-      var loaded = topo.terms[c.id].some(function (j) { return hum[r.roots[j]]; });
-      if (!loaded) { st.ot = 0; return; }
-      st.ot = (st.ot || 0) + dt;
-      if (st.ot >= SL.TRIP_TIME_THERMAL) {
+      var st = self.s(c.id), ks = rootsOf(c), rate = 0, reason = "";
+      ks.forEach(function (k) { if (heat[k] > rate) { rate = heat[k]; reason = why[k]; } });
+      if (st.act) {
+        st.heat = Math.max(0, (st.heat || 0) - dt / SL.THERMAL_COOL);
+        if (c.auto_reset && st.heat <= 0.3) {
+          self.setActuator(doc, c.id, false);
+          self.note((c.name || "Relé tèrmic") + ": rearmament automàtic");
+        }
+        return;
+      }
+      st.heat = rate ? (st.heat || 0) + dt * rate : Math.max(0, (st.heat || 0) - dt / SL.THERMAL_COOL);
+      if (st.heat >= 1) {
         self.setActuator(doc, c.id, true);
-        st.ot = 0;
-        self.events.push((c.name || "Relé tèrmic") + ": ha disparat el relé tèrmic (motor funcionant amb dues fases)");
+        self.note((c.name || "Relé tèrmic") + ": ha disparat el relé tèrmic (" + reason + ")");
       }
     });
+  };
+
+  /** Starting-resistor steps still in a wound rotor's circuit (each one not bridged by a contact). */
+  Sim.prototype.rotorSteps = function (doc, topo, m) {
+    var self = this, t = topo.terms[m.id], steps = 0, keep = [this.pot, this.wirePot];
+    var rotorClosed = function (rr) { return rr.roots[t[4]] === rr.roots[t[5]] && rr.roots[t[5]] === rr.roots[t[6]]; };
+    var base = this.solve(doc, topo), rotor = [base.roots[t[4]], base.roots[t[5]], base.roots[t[6]]];
+    doc.comps.forEach(function (o) {
+      if (o.kind !== "Resistor3" && o.kind !== "Resistor1") return;
+      if (!topo.terms[o.id].some(function (j) { return rotor.indexOf(base.roots[j]) >= 0; })) return;
+      self.forceOpen[o.id] = true;
+      var rr = self.solve(doc, topo);
+      delete self.forceOpen[o.id];
+      if (!rotorClosed(rr)) steps++;
+    });
+    this.pot = keep[0]; this.wirePot = keep[1]; // trial solves must not change what is drawn
+    return steps;
+  };
+
+  /** Click on a motor during simulation: brake it (stall) or release it. */
+  Sim.prototype.toggleBrake = function (doc, id) {
+    var st = this.s(id), c = doc.comps.find(function (x) { return x.id === id; });
+    st.blocked = !st.blocked;
+    this.note((c && c.name || "Motor") + (st.blocked ? ": frenat (sobrecàrrega)" : ": fre alliberat"));
   };
 
   /**
@@ -643,11 +852,11 @@
     var c = best.c, st = this.s(c.id), why = fault === "Short" ? "curtcircuit" : "derivació a terra";
     if (isFuse(c.kind)) {
       st.blown = true;
-      this.events.push((c.name || "Fusible") + ": s'ha fos el fusible (" + why + "). Feu-hi clic per canviar-lo.");
+      this.note((c.name || "Fusible") + ": s'ha fos el fusible (" + why + "). Feu-hi clic per canviar-lo.");
     } else {
       this.setActuator(doc, c.id, false);
       doc.comps.forEach(function (o) { if (o.id === c.id || (c.name && o.name === c.name && o.kind === c.kind)) self.s(o.id).tripped = true; });
-      this.events.push((c.name || SL.KINDS[c.kind].label) + ": ha disparat " +
+      this.note((c.name || SL.KINDS[c.kind].label) + ": ha disparat " +
         (isRcd(c.kind) ? "el diferencial" : "la protecció") + " (" + why + ")");
     }
     return true;
@@ -659,7 +868,7 @@
     if (!st.blown) return false;
     st.blown = false;
     var c = doc.comps.find(function (x) { return x.id === id; });
-    this.events.push((c && c.name || "Fusible") + ": fusible canviat");
+    this.note((c && c.name || "Fusible") + ": fusible canviat");
     return true;
   };
 
@@ -686,25 +895,44 @@
     return st.val;
   };
 
-  SL.Sim = Sim;
-
-  SL.clickKind = function (kind) {
-    // momentary: push buttons, mushroom buttons, limit switches (sub_43ee20 / sub_45fe10)
-    if (["PushBtn", "PushNO", "PushNC", "PushNONC", "PushCO",
-      "MushroomNO", "MushroomNC", "MushroomNONC", "MushroomCO",
-      "LimitNO", "LimitNC", "LimitNONC", "LimitCO",
-      "DetIndNO", "DetIndNC", "DetCapNO", "DetCapNC", "DetMagNO", "DetMagNC",
-      "PhotoBarrier", "PhotoRecNO", "PhotoRecNC",
-      "PressNO", "PressNC", "VacNO", "VacNC", "ThermoNO", "ThermoNC"].indexOf(kind) >= 0) return "momentary";
-    if (["SwitchNO", "SwitchNC", "SwitchNONC", "SwitchCO", "Sel102", "Sel123", "CrossSw",
-      "Auto1", "Auto1N", "Auto2", "Auto3", "Auto3N",
-      "Rcd1N", "Rcd3N", "Breaker1", "Breaker1N", "Breaker2",
-      "Breaker3", "Breaker3N", "PermOvervolt1N", "PermOvervolt3N",
-      "Switch1", "Switch2", "Switch3", "Switch4", "ThermalRelay3",
-      "FuseSw1", "FuseSw1N", "FuseSw2", "FuseSw3", "FuseSw3N"].indexOf(kind) >= 0) return "toggle";
-    if (isFuse(kind)) return "fuse"; // only when blown: click replaces it
-    if (kind === "LogicProbe") return "toggle";
-    if (kind === "LogicPreset") return "preset";
+  // ---------------------------------------------------------------- probe (polímetre)
+  var POT_NAMES = [[P.L1, "L1"], [P.L2, "L2"], [P.L3, "L3"], [P.N, "N"], [P.PE, "PE"], [P.POS, "+"], [P.NEG, "−"]];
+  /** "L1", "N", "+"... or "sense tensió" for a potential mask. */
+  SL.potName = function (m) {
+    if (!m) return "sense tensió";
+    return POT_NAMES.filter(function (x) { return m & x[0]; }).map(function (x) { return x[1]; }).join("+");
+  };
+  /** Reading of a voltmeter between two points (masks), as text. Nominal 230/400 V AC, 24 V DC. */
+  SL.voltage = function (ma, mb) {
+    var a = single(ma), b = single(mb), dc = function (p) { return p === P.POS || p === P.NEG; };
+    if (!a || !b) return "0 V (" + (!a && !b ? "cap punt amb tensió" : "un punt sense tensió") + ")";
+    if (a === b) return "0 V";
+    if (dc(a) && dc(b)) return "24 V CC";
+    if (dc(a) || dc(b)) return "— (CC i CA no comparables)";
+    if (isPhase(a) && isPhase(b)) return "400 V CA";
+    if ((a === P.N && b === P.PE) || (a === P.PE && b === P.N)) return "0 V";
+    return "230 V CA";
+  };
+  /** Potential mask at a world point during simulation: on a wire or at a terminal/junction. */
+  Sim.prototype.potAt = function (doc, w, tol) {
+    var best = null, bd = tol;
+    var self = this;
+    Object.keys(this.pot).forEach(function (k) {
+      var p = k.split(","), dd = Math.hypot(+p[0] - w[0], +p[1] - w[1]);
+      if (dd <= bd) { bd = dd; best = { m: self.pot[k] || 0, where: "punt" }; }
+    });
+    if (best) return best;
+    for (var i = doc.wires.length - 1; i >= 0; i--) {
+      var x = doc.wires[i], a = x.a, b = x.b;
+      var abx = b[0] - a[0], aby = b[1] - a[1], l2 = abx * abx + aby * aby;
+      var t = l2 ? Math.max(0, Math.min(1, ((w[0] - a[0]) * abx + (w[1] - a[1]) * aby) / l2)) : 0;
+      if (Math.hypot(a[0] + abx * t - w[0], a[1] + aby * t - w[1]) <= tol) return { m: this.wirePot[x.id] || 0, where: "conductor" };
+    }
     return null;
   };
+
+  SL.Sim = Sim;
+
+  /** What a click on this element does during simulation (see SL.KINDS[k].click). */
+  SL.clickKind = function (kind) { return SL.KINDS[kind].click; };
 })((typeof globalThis !== "undefined" ? globalThis : window).SL);

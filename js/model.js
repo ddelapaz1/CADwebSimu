@@ -87,6 +87,10 @@ SL.CATS = [
     ["Motor3", "Motors", "Motor trifàsic", "Load", 0, false, "-M"],
     ["Motor3YD", "Motors", "Motor trifàsic YD (estrella-triangle, 6 borns)", "Load", 0, false, "-M"],
     ["Motor1", "Motors", "Motor monofàsic", "Load", 0, false, "-M"],
+    ["Motor1Cap", "Motors", "Motor monofàsic amb condensador", "Load", 0, false, "-M"],
+    ["Motor3Dahl", "Motors", "Motor Dahlander (dues velocitats)", "Load", 0, false, "-M"],
+    ["Motor3WR", "Motors", "Motor de rotor bobinat", "Load", 0, false, "-M"],
+    ["MotorDC", "Motors", "Motor de corrent continu", "Load", 0, false, "-M"],
     ["Resistor1", "Power", "Resistència I", "Passive", 1, false, "-R"],
     ["Resistor3", "Power", "Resistència III", "Passive", 3, false, "-R"],
     ["AutoTrans3", "Power", "Autotransformador III", "Passive", 3, false, "-T"],
@@ -218,6 +222,7 @@ SL.CATS = [
     ["Wire", "Connections", "Cable", "Tool", 0, false, "", "wire"],
     ["Junction", "Connections", "Punt de connexió", "Tool", 0, false, "", "junction"],
     ["Terminal", "Connections", "Born", "Passive", 0, false, "-X"],
+    ["Continuation", "Connections", "Referència de continuació (entre fulls)", "Passive", 0, false, "C"],
   ];
   var feeds = {
     FeedL: [[P.L1, "L"]],
@@ -235,6 +240,21 @@ SL.CATS = [
     Ground: [[P.PE, "PE"]],
     Battery: [[P.POS, "+"], [P.NEG, "-"]],
   };
+  var COILS = ["Coil", "LatchCoil", "StepRelay", "Solenoid", "TimerOn", "TimerOff", "TimerOnOff", "Flasher",
+    "PulseGen", "TimeSwitch", "Counter", "SoftCtrl", "SoftRevCtrl", "VfdACCtrl", "DriveDCCtrl",
+    "SsrDC", "SsrAC", "PhaseLossN", "PhaseLoss", "PhaseSeqN", "PhaseSeq", "CoilContactNO", "CoilContactCO"];
+  // momentary: push buttons, mushroom buttons, limit switches, detectors (sub_43ee20 / sub_45fe10)
+  var MOMENTARY = ["PushBtn", "PushNO", "PushNC", "PushNONC", "PushCO",
+    "MushroomNO", "MushroomNC", "MushroomNONC", "MushroomCO",
+    "LimitNO", "LimitNC", "LimitNONC", "LimitCO",
+    "DetIndNO", "DetIndNC", "DetCapNO", "DetCapNC", "DetMagNO", "DetMagNC",
+    "PhotoBarrier", "PhotoRecNO", "PhotoRecNC",
+    "PressNO", "PressNC", "VacNO", "VacNC", "ThermoNO", "ThermoNC"];
+  var TOGGLE = ["SwitchNO", "SwitchNC", "SwitchNONC", "SwitchCO", "Sel102", "Sel123", "CrossSw",
+    "Auto1", "Auto1N", "Auto2", "Auto3", "Auto3N", "Rcd1N", "Rcd3N",
+    "Breaker1", "Breaker1N", "Breaker2", "Breaker3", "Breaker3N", "PermOvervolt1N", "PermOvervolt3N",
+    "Switch1", "Switch2", "Switch3", "Switch4", "ThermalRelay3",
+    "FuseSw1", "FuseSw1N", "FuseSw2", "FuseSw3", "FuseSw3N", "LogicProbe"];
   SL.KINDS = {};
   SL.KIND_LIST = [];
   rows.forEach(function (r) {
@@ -247,11 +267,15 @@ SL.CATS = [
     k.timer = ["TimerOn", "TimerOff", "TimerOnOff", "Flasher", "PulseGen", "TimeSwitch",
       "LogicTon", "LogicTp", "LogicTof", "LogicFlash", "LogicPulse"].indexOf(k.id) >= 0;
     k.counter = ["Counter", "LogicCnt", "LogicCntUD"].indexOf(k.id) >= 0; // has a count preset
-    k.driver = ["Coil", "LatchCoil", "StepRelay", "Solenoid", "TimerOn", "TimerOff", "TimerOnOff", "Flasher",
-      "PulseGen", "TimeSwitch", "Counter", "ThermalRelay3",
-      "SoftCtrl", "SoftRevCtrl", "VfdACCtrl", "DriveDCCtrl",
-      "SsrDC", "SsrAC", "PhaseLossN", "PhaseLoss", "PhaseSeqN", "PhaseSeq",
-      "CoilContactNO", "CoilContactCO"].indexOf(k.id) >= 0 || k.role === "Actuator";
+    // coil: its "on" state moves the contacts and poles that carry its name
+    k.coil = COILS.indexOf(k.id) >= 0;
+    k.driver = k.coil || k.id === "ThermalRelay3" || k.role === "Actuator";
+    // what a click does during simulation
+    k.click = MOMENTARY.indexOf(k.id) >= 0 ? "momentary" : TOGGLE.indexOf(k.id) >= 0 ? "toggle" :
+      /^Fuse\d/.test(k.id) ? "fuse" : k.id === "LogicPreset" ? "preset" : /^Motor/.test(k.id) ? "brake" : null;
+    k.motor = /^Motor/.test(k.id);
+    // electronic starters and drives: the motor they feed follows a speed ramp
+    k.ramp = ["SoftStarter3", "VfdAC2", "VfdAC3", "DriveDC2", "DriveDC2Shunt", "DriveDC3", "DriveDC3Shunt"].indexOf(k.id) >= 0;
     SL.KINDS[k.id] = k;
     SL.KIND_LIST.push(k);
   });
@@ -271,6 +295,21 @@ SL.PAGE_SIZES = {
   A4Horizontal: { label: "A4 Horitzontal", w: 1485, h: 1050 },
   A3Format1: { label: "A3 Format 1", w: 2100, h: 1485 },
   A3Format2: { label: "A3 Format 2", w: 1485, h: 2100 },
+};
+
+// Several sheets are stacked vertically in the same drawing, SHEET_GAP apart.
+SL.SHEET_GAP = 90;
+SL.sheetCount = function (doc) { return Math.max(1, (doc.page && doc.page.count) | 0 || 1); };
+SL.sheetY = function (doc, k) { var ps = SL.PAGE_SIZES[doc.page.size] || SL.PAGE_SIZES.A4Horizontal; return k * (ps.h + SL.SHEET_GAP); };
+/** Sheet number (1..n) that contains a world point. */
+SL.sheetOf = function (doc, p) {
+  var ps = SL.PAGE_SIZES[doc.page.size] || SL.PAGE_SIZES.A4Horizontal;
+  return Math.min(SL.sheetCount(doc), Math.max(1, Math.floor(p[1] / (ps.h + SL.SHEET_GAP)) + 1));
+};
+/** Size of the whole drawing (all sheets). */
+SL.docSize = function (doc) {
+  var ps = (SL.PAGE_SIZES && doc.page && SL.PAGE_SIZES[doc.page.size]) || { w: 1485, h: 1050 }, n = SL.sheetCount(doc);
+  return { w: ps.w, h: n * ps.h + (n - 1) * SL.SHEET_GAP };
 };
 
 SL.newDoc = function () {
@@ -297,12 +336,18 @@ SL.normalizeDoc = function (d) {
       count_preset: c.count_preset == null ? 3 : Math.max(1, +c.count_preset | 0), // pulse counter
       off_base: c.off_base == null ? 5 : +c.off_base, // time switch: OFF time (same multiplier)
       value: Math.max(0, Math.min(9, +c.value | 0)), // logic preselector digit
+      lx: +c.lx || 0, ly: +c.ly || 0, // name label moved by the user
+      auto_reset: !!c.auto_reset, // overload relay: automatic reset
     };
   });
   n.wires = (d.wires || []).map(function (w) { return { id: w.id, a: [w.a[0], w.a[1]], b: [w.b[0], w.b[1]] }; });
   n.junctions = (d.junctions || []).map(function (p) { return [p[0] | 0, p[1] | 0]; });
   n.no_junctions = (d.no_junctions || []).map(function (p) { return [p[0] | 0, p[1] | 0]; });
   n.drawings = d.drawings || [];
+  // fault mode: hidden faults set by the teacher, optional password hash, hide voltage colours
+  n.faults = (d.faults || []).filter(function (f) { return f && f.id != null && f.type; }).map(function (f) { return { id: f.id, type: f.type }; });
+  n.fault_lock = d.fault_lock || "";
+  n.fault_hide = d.fault_hide !== false;
   n.texts = d.texts || [];
   if (d.page) Object.assign(n.page, d.page);
   if (d.title) Object.assign(n.title, d.title);
@@ -518,7 +563,7 @@ SL.addRoute = function (doc, a, b) {
 SL.routeOrthogonal = function (doc, pA, pB, opts) {
   opts = opts || {};
   if (pA[0] === pB[0] && pA[1] === pB[1]) return null;
-  var ps = (SL.PAGE_SIZES && doc.page && SL.PAGE_SIZES[doc.page.size]) || { w: 1485, h: 1050 };
+  var ps = SL.docSize(doc);
   var minX = 0, minY = 0, maxX = ps.w, maxY = ps.h;
   if (pA[0] < minX || pA[0] > maxX || pA[1] < minY || pA[1] > maxY) return null;
   if (pB[0] < minX || pB[0] > maxX || pB[1] < minY || pB[1] > maxY) return null;
@@ -1023,7 +1068,7 @@ function transformItems(doc, selSet, movedComps, opts) {
   }
 
   // Check if any moved component collides with another component or is out of page bounds
-  var ps = (SL.PAGE_SIZES && doc.page && SL.PAGE_SIZES[doc.page.size]) || { w: 1485, h: 1050 };
+  var ps = SL.docSize(doc);
   var margin = (doc.page && doc.page.border) ? 25 : 0;
   var invalidMovedComp = {};
   movedComps.forEach(function (mc) {

@@ -19,8 +19,13 @@
     doc.drawings.forEach(function (d) {
       r.drawing(shifted(d, function (o) { o.a = [o.a[0] + dx, o.a[1] + dy]; o.b = [o.b[0] + dx, o.b[1] + dy]; return o; }), sel.has(d.id));
     });
-    function ptColor(p) { return (sim && SL.potColor(sim.pot[key(p)])) || "#000"; }
+    function ptColor(p) { return (sim && !hideV && SL.potColor(sim.pot[key(p)])) || "#000"; }
+    var net = !sim && opts.net;
+    // fault mode: conductors stay black so the faults are found by measuring
+    var hideV = sim && (doc.faults || []).length && doc.fault_hide !== false;
     function wireColor(w) {
+      if (hideV) return "#000";
+      if (net && net.wires.has(w.id)) return "rgb(255,120,0)";
       if (!sim) return "#000";
       var m = sim.wirePot && sim.wirePot[w.id] != null ? sim.wirePot[w.id] : sim.pot[key(w.a)];
       return SL.potColor(m) || "#000";
@@ -32,6 +37,13 @@
     SL.junctionPoints(doc).forEach(function (p) {
       r.dot(p, ptColor(p));
     });
+    if (sim && A.probeRef) {
+      // reference point of the probe
+      var rp = r.s(A.probeRef.p), rg = r.g;
+      rg.strokeStyle = "rgb(0,150,0)"; rg.lineWidth = 2; rg.setLineDash([]);
+      rg.beginPath(); rg.arc(rp[0], rp[1], 6, 0, 2 * Math.PI); rg.stroke();
+      r.text([rp[0] + 8, rp[1] - 8], "REF", 10, "rgb(0,150,0)", "left");
+    }
     var drivers = sim ? sim.drivers(doc) : null;
     doc.comps.forEach(function (c) {
       var K = SL.KINDS[c.kind], vis = {}, color = "#000", extra = null;
@@ -59,7 +71,20 @@
             vis.lamp = SL.rgb(SL.LAMP_COLORS[c.color] || SL.LAMP_COLORS.Verde);
           }
           if (["Bell", "Buzzer", "Siren", "Horn"].indexOf(c.kind) >= 0) vis.active = st.energized;
-          vis.motor = st.motor; vis.conn = st.conn; vis.angle = st.angle;
+          vis.motor = st.motor || ((st.spd || 0) > 0.01 ? st.dir : 0); vis.conn = st.conn; vis.angle = st.angle;
+          if (K.motor) {
+            if (st.blocked && st.motor) extra = "frenat";
+            else if (st.rotorOpen) extra = "rotor obert";
+            else if (st.twoPhase) extra = c.kind === "Motor3" ? "2 fases!" : "no arrenca!";
+            else if (st.motor || st.spd > 0.01) {
+              var pct = Math.round((st.spd || 0) / SL.motorLevel(c, st) * 100);
+              var parts = [];
+              if (pct < 99) parts.push(Math.min(100, pct) + " %");
+              if (c.kind === "Motor3WR" && st.steps) parts.push("R: " + st.steps + (st.steps === 1 ? " graó" : " graons"));
+              if (c.kind === "Motor3Dahl") parts.push(st.conn === 2 ? "alta" : "baixa");
+              extra = parts.join(" · ") || null;
+            }
+          }
           if (c.kind === "Counter") {
             extra = (st.count || 0) + " / " + Math.max(1, c.count_preset | 0 || 3);
           } else if (c.kind === "TimeSwitch") {
@@ -67,8 +92,6 @@
               var tOn = SL.presetSecs(c), per = tOn + SL.offSecs(c), ph = per > 0 ? st.t % per : 0;
               extra = st.phaseOn !== false ? "ON " + Math.max(0, tOn - ph).toFixed(1) + " s" : "OFF " + Math.max(0, per - ph).toFixed(1) + " s";
             }
-          } else if (c.kind === "Motor3" && st.twoPhase) {
-            extra = "2 fases!";
           } else if (K.timer && (st.energized || st.on) && !(c.kind === "TimerOnOff" && st.energized === st.on)) {
             var rem = c.kind === "TimerOn" && st.on ? 0 : Math.max(0, SL.presetSecs(c) - st.t);
             extra = rem.toFixed(1) + " s";
@@ -85,11 +108,32 @@
         vis.closed = K.role === "Manual" ? !!c.closed : K.nc; // contacts at rest, breakers as stored
         if (c.kind === "LogicPreset") vis.val = c.value || 0;
       }
+      if (c.kind === "Continuation" && c.name) {
+        // where the other markers with this name are: sheet.column
+        var to = doc.comps.filter(function (o) { return o !== c && o.kind === "Continuation" && o.name === c.name; })
+          .map(function (o) { var rr = SL.compRect(o); return SL.colRef(doc, [(rr.x0 + rr.x1) / 2, (rr.y0 + rr.y1) / 2]); });
+        extra = to.length ? "→ " + to.join(", ") : "(sense parella)";
+        if (sim) color = SL.potColor(sim.pot[key(SL.terminals(c)[0])]) || C.GRAY;
+      }
       var isSel = sel.has(c.id), cc = c;
       if (isSel && (dx || dy)) { cc = Object.assign({}, c); cc.x += dx; cc.y += dy; }
       var box = r.comp(cc, vis, isSel ? C.SEL : color, doc.page.show_terminals, extra);
       if (isSel) { r.g.strokeStyle = C.SEL; r.g.lineWidth = 1; r.g.setLineDash([]); r.g.strokeRect(box.x0 - 3, box.y0 - 3, box.x1 - box.x0 + 6, box.y1 - box.y0 + 6); }
     });
+    // cross references under each coil: its contacts and the column where they are
+    if (doc.page.references && doc.page.xref !== false) {
+      var fsx = Math.max(4, 8 * r.v.zoom);
+      if (fsx >= 4.5) doc.comps.forEach(function (c) {
+        var K = SL.KINDS[c.kind];
+        if (!c.name || !(K.coil || c.kind === "ThermalRelay3")) return;
+        var lines = SL.crossRefs(doc, c);
+        if (!lines.length) return;
+        var b = SL.compRect(c), hz = SL.isHorizontal(c), cx = (b.x0 + b.x1) / 2;
+        // beside the conductor that leaves the coil downwards (or under a horizontal coil)
+        var p = hz ? [cx, b.y1 + 14] : [cx + 6, b.y1 + 4];
+        r.text(r.s(p), lines.join("\n"), fsx, "rgb(0,0,128)", hz ? "center" : "left", "top");
+      });
+    }
     doc.texts.forEach(function (x) {
       r.textItem(shifted(x, function (o) { o.x += dx; o.y += dy; return o; }), sel.has(x.id));
     });
@@ -127,6 +171,17 @@
     }
     var tol = Math.max(3, 5 / t.view.zoom);
     for (i = d.wires.length - 1; i >= 0; i--) if (segDist(w, d.wires[i].a, d.wires[i].b) < tol) return d.wires[i].id;
+    return null;
+  }
+
+  /** Component whose name label is under w (only when the click is not on a symbol body). */
+  function labelHit(w) {
+    var d = A.tab().doc, i;
+    for (i = d.comps.length - 1; i >= 0; i--) if (inRect(SL.compRect(d.comps[i]), w, 3)) return null;
+    for (i = d.comps.length - 1; i >= 0; i--) {
+      var r = SL.labelRect(d.comps[i]);
+      if (r && inRect(r, w, 1)) return d.comps[i];
+    }
     return null;
   }
 
@@ -174,11 +229,21 @@
     clearRcHold();
     if ((A.openCat || A.radialMenu) && A.closeSymDeploy) A.closeSymDeploy();
     if (e.button === 1 || (e.button === 0 && e.altKey)) { A.drag = { t: "pan", x: e.clientX, y: e.clientY }; cv.setPointerCapture(e.pointerId); return; }
+    if (A.diagPick && e.button === 0) { A.faultCheck(hit(w)); A.redraw(); return; } // fault mode: student points at the fault
     if (t.mode !== "edit") {
       if (e.button !== 0) return;
+      if (e.shiftKey && t.sim) {
+        var pr = t.sim.potAt(t.doc, w, Math.max(4, 6 / t.view.zoom));
+        A.probeRef = pr ? { m: pr.m, p: w } : null;
+        A.setStatus(pr ? "Referència de la sonda fixada (" + SL.potName(pr.m) + "). Passeu per sobre d'un altre punt per mesurar." : "Referència de la sonda esborrada");
+        updateProbe(e, w);
+        A.redraw();
+        return;
+      }
       var c = clickable(w);
       if (!c) return;
       if (SL.clickKind(c.kind) === "fuse") t.sim.replaceFuse(t.doc, c.id);
+      else if (SL.clickKind(c.kind) === "brake") t.sim.toggleBrake(t.doc, c.id);
       else if (SL.clickKind(c.kind) === "preset") {
         c.value = t.sim.stepPreset(t.doc, c.id); // remembered for the next run
         t.dirty = true; A.changed();
@@ -233,6 +298,14 @@
     if (T.t === "text") { A.textDialog(null, w); return; }
     if (T.t === "shape") { A.drag = { t: "shape", a: w, b: w }; return; }
     if (T.t === "zoomwin") { A.drag = { t: "rubber", a: w, b: w, zoom: true }; return; }
+    var lc = !e.shiftKey && labelHit(w);
+    if (lc) {
+      // drag the name label on its own
+      A.sel = new Set([lc.id]);
+      A.drag = { t: "label", c: lc, a: w, b: w, lx: lc.lx || 0, ly: lc.ly || 0, saved: false };
+      A.redraw();
+      return;
+    }
     var id = hit(w);
     if (id != null) {
       if (e.shiftKey) { if (A.sel.has(id)) A.sel.delete(id); else A.sel.add(id); }
@@ -245,6 +318,42 @@
     A.redraw();
   }
 
+  // ---- probe (simulation): hover shows the potential; Shift+click fixes the reference point
+  var probeEl = null;
+  function updateProbe(e, w) {
+    var t = A.tab();
+    if (!probeEl) return;
+    if (t.mode === "edit" || !t.sim || A.drag) { probeEl.hidden = true; return; }
+    var tol = Math.max(4, 6 / t.view.zoom), r = t.sim.potAt(t.doc, w, tol);
+    if (!r) { probeEl.hidden = true; return; }
+    var txt = "Sonda: " + SL.potName(r.m);
+    if (A.probeRef) txt += "\nRespecte de la referència (" + SL.potName(A.probeRef.m) + "): " + SL.voltage(A.probeRef.m, r.m);
+    else txt += "\nMaj+clic: fixa aquest punt com a referència";
+    probeEl.textContent = txt;
+    probeEl.style.left = (e.clientX + 14) + "px";
+    probeEl.style.top = (e.clientY + 14) + "px";
+    probeEl.hidden = false;
+  }
+
+  // ---- edit mode: hovering a conductor or terminal highlights its whole net
+  function netAt(w) {
+    var t = A.tab(), d = t.doc, topo = SL.topoFor(d), tol = Math.max(3, 5 / t.view.zoom), root = null, i;
+    var terms = [];
+    d.comps.forEach(function (c) { SL.terminals(c).forEach(function (p) { terms.push(p); }); });
+    for (i = 0; i < terms.length && root == null; i++) {
+      if (Math.hypot(terms[i][0] - w[0], terms[i][1] - w[1]) <= tol) root = topo.base[topo.idx[key(terms[i])]];
+    }
+    for (i = d.wires.length - 1; i >= 0 && root == null; i--) {
+      if (segDist(w, d.wires[i].a, d.wires[i].b) < tol && topo.wireNode[d.wires[i].id] != null) root = topo.base[topo.wireNode[d.wires[i].id]];
+    }
+    if (root == null) return null;
+    var net = { wires: new Set(), pts: [] };
+    d.wires.forEach(function (x) { var n = topo.wireNode[x.id]; if (n != null && topo.base[n] === root) net.wires.add(x.id); });
+    topo.coordList.forEach(function (p) { if (topo.base[topo.idx[key(p)]] === root) net.pts.push(p); });
+    if (!net.wires.size) return null;
+    return net;
+  }
+
   function onMove(e) {
     if (rcHold && Math.hypot(e.clientX - rcHold.x, e.clientY - rcHold.y) > 8) {
       clearRcHold();
@@ -255,9 +364,16 @@
     if (dr && dr.t === "pan") {
       var v = A.tab().view;
       v.panX += e.clientX - dr.x; v.panY += e.clientY - dr.y; dr.x = e.clientX; dr.y = e.clientY;
+    } else if (dr && dr.t === "label") {
+      dr.b = m.w;
+      if (!dr.saved) { A.checkpoint(); dr.saved = true; }
+      dr.c.lx = Math.round(dr.lx + dr.b[0] - dr.a[0]);
+      dr.c.ly = Math.round(dr.ly + dr.b[1] - dr.a[1]);
     } else if (dr) dr.b = m.w;
     if (A.tab().mode !== "edit") cv.style.cursor = clickable(m.w) ? "pointer" : "default";
     else cv.style.cursor = A.tool.t === "select" ? "default" : "crosshair";
+    updateProbe(e, m.w);
+    A.hoverNet = A.tab().mode === "edit" && !dr && (A.tool.t === "select" || A.tool.t === "wire") ? netAt(m.w) : null;
     A.updateStatus();
     A.redraw();
   }
@@ -282,7 +398,9 @@
     var dr = A.drag;
     A.drag = null;
     if (!dr) { A.redraw(); return; }
-    if (dr.t === "move") {
+    if (dr.t === "label") {
+      if (dr.saved) A.changed();
+    } else if (dr.t === "move") {
       var dx = SL.snap(dr.b[0] - dr.a[0]), dy = SL.snap(dr.b[1] - dr.a[1]);
       if (dx || dy) moveSelection(dx, dy);
     } else if (dr.t === "rubber") {
@@ -307,7 +425,7 @@
 
   function onDbl(e) {
     if (A.tab().mode !== "edit" || A.tool.t !== "select" || A.dialogOpen) return;
-    var id = hit(world(e).w);
+    var w = world(e).w, lc = labelHit(w), id = lc ? lc.id : hit(w);
     if (id != null) A.openProps(id);
   }
 
@@ -336,7 +454,7 @@
     g.fillStyle = "rgb(128,128,128)"; g.fillRect(0, 0, w, h);
     var r = new SL.Renderer(g, t.view), dr = A.drag, dx = 0, dy = 0;
     if (dr && dr.t === "move") { dx = SL.snap(dr.b[0] - dr.a[0]); dy = SL.snap(dr.b[1] - dr.a[1]); }
-    SL.drawDoc(r, t, { grid: A.grid, sel: A.sel, dx: dx, dy: dy });
+    SL.drawDoc(r, t, { grid: A.grid, sel: A.sel, dx: dx, dy: dy, net: A.hoverNet });
     // overlays
     if (t.mode === "edit" && A.hover) {
       var sw = [SL.snap(A.hover[0]), SL.snap(A.hover[1])];
@@ -382,6 +500,10 @@
       cv = document.getElementById("canvas");
       g = cv.getContext("2d");
       cv.addEventListener("pointerdown", onDown);
+      probeEl = document.createElement("div");
+      probeEl.id = "probe"; probeEl.hidden = true;
+      document.body.appendChild(probeEl);
+      cv.addEventListener("pointerleave", function () { probeEl.hidden = true; A.hoverNet = null; A.redraw(); });
       cv.addEventListener("pointermove", onMove);
       cv.addEventListener("pointerup", onUp);
       cv.addEventListener("pointercancel", onUp);

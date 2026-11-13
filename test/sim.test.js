@@ -6,7 +6,7 @@ const vm = require("vm");
 const ctx = { console };
 ctx.globalThis = ctx;
 vm.createContext(ctx);
-for (const f of ["model.js", "symbols.js", "sim.js", "examples.js"]) {
+for (const f of ["model.js", "symbols.js", "sim.js", "render.js", "examples.js"]) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8"), ctx, { filename: f });
 }
 const SL = ctx.SL;
@@ -152,7 +152,7 @@ test("file format matches the Mac app", () => {
 
 test("Connections submenu contains Cable, Punt de connexió, and Born", () => {
   const connItems = SL.KIND_LIST.filter((k) => k.cat === "Connections").map((k) => k.id);
-  eq(connItems, ["Wire", "Junction", "Terminal"]);
+  eq(connItems, ["Wire", "Junction", "Terminal", "Continuation"]);
   eq(SL.KINDS.Wire.label, "Cable");
   eq(SL.KINDS.Junction.label, "Punt de connexió");
   eq(SL.buildSymbol("Wire", {}).prims.length > 0, true);
@@ -598,6 +598,171 @@ test("rotating several elements turns the whole block, not each element", () => 
   const one = build();
   SL.rotateItems(one.d, new Set([one.n[0].id]), 1, false);
   eq([one.n[0].x, one.n[0].y, one.n[0].rot], [300, 150, 1], "a single element still turns in place");
+});
+
+test("fault mode: cut wire, open coil, stuck contact", () => {
+  const run = (fault) => {
+    const d = SL.exampleDoc();
+    const id = (k, n) => d.comps.find((c) => c.kind === k && c.name === n).id;
+    if (fault) d.faults = [fault(d, id)];
+    const s = new SL.Sim(d), m = id("Motor3", "-M1"), s1 = id("PushNO", "-S1");
+    s.tick(d, 0.1); s.setActuator(d, s1, true); s.tick(d, 0.1); s.setActuator(d, s1, false); s.tick(d, 0.1);
+    return s.st[m].motor;
+  };
+  eq(run(null), 1, "healthy circuit runs");
+  eq(run((d, id) => ({ id: id("Coil", "-KM1"), type: "open" })), 0, "burnt coil: no start");
+  eq(run((d, id) => ({ id: id("PushNO", "-S1"), type: "open" })), 0, "start button never closes");
+  eq(run((d, id) => ({ id: id("AuxNO", "-KM1"), type: "open" })), 0, "self-holding contact open: stops on release");
+  const stuck = SL.exampleDoc(), sid = (k, n) => stuck.comps.find((c) => c.kind === k && c.name === n).id;
+  stuck.faults = [{ id: sid("PushNO", "-S1"), type: "stuck" }];
+  const ss = new SL.Sim(stuck); ss.tick(stuck, 0.1);
+  eq(ss.st[sid("Motor3", "-M1")].motor, 1, "stuck start button starts the motor by itself");
+  // a cut wire: find the conductor that feeds the coil terminal A1 and cut it
+  const cutDoc = SL.exampleDoc(), coil = cutDoc.comps.find((c) => c.kind === "Coil");
+  const a1 = SL.terminals(coil)[0];
+  const w = cutDoc.wires.find((x) => (x.a[0] === a1[0] && x.a[1] === a1[1]) || (x.b[0] === a1[0] && x.b[1] === a1[1]));
+  cutDoc.faults = [{ id: w.id, type: "cut" }];
+  const cs = new SL.Sim(cutDoc), cid = (k, n) => cutDoc.comps.find((c) => c.kind === k && c.name === n).id;
+  cs.tick(cutDoc, 0.1); cs.setActuator(cutDoc, cid("PushNO", "-S1"), true); cs.tick(cutDoc, 0.1);
+  eq(cs.st[cid("Motor3", "-M1")].motor, 0, "cut wire: coil not fed");
+  eq(cs.wirePot[w.id] == null, true, "the cut wire carries nothing");
+  // the probe reads 0 V across an open coil that has voltage on both sides
+  eq(SL.voltage(SL.POT.L1, SL.POT.N), "230 V CA");
+  eq(SL.voltage(SL.POT.L1, SL.POT.L2), "400 V CA");
+  eq(SL.voltage(SL.POT.POS, SL.POT.NEG), "24 V CC");
+  eq(SL.voltage(SL.POT.L1, 0).indexOf("0 V"), 0);
+  eq(SL.potName(SL.POT.L1 | SL.POT.N), "L1+N");
+});
+
+test("new motors: DC polarity, capacitor motor, Dahlander, wound rotor", () => {
+  const W = (d, a, b) => SL.addWire(d, a, b);
+  // DC motor
+  let d = SL.newDoc();
+  SL.makeComp(d, "FeedPosNeg", 300, 170, 0, "");
+  let m = SL.makeComp(d, "MotorDC", 300, 200, 0, "-M1");
+  let s = new SL.Sim(d); s.tick(d, 0.1); eq(s.st[m.id].motor, 1, "DC forward");
+  d = SL.newDoc();
+  SL.makeComp(d, "FeedPosNeg", 300, 90, 0, "");                 // + (300,120)  - (330,120)
+  m = SL.makeComp(d, "MotorDC", 300, 200, 0, "-M1");            // A1 (300,200) A2 (330,200)
+  W(d, [330, 120], [330, 165]); W(d, [330, 165], [300, 165]); W(d, [300, 165], [300, 200]);
+  W(d, [300, 120], [270, 120]); W(d, [270, 120], [270, 180]); W(d, [270, 180], [330, 180]); W(d, [330, 180], [330, 200]);
+  s = new SL.Sim(d); eq(s.tick(d, 0.1), null); eq(s.st[m.id].motor, -1, "DC reversed polarity");
+
+  // capacitor motor
+  const cap = (aux) => {
+    const dd = SL.newDoc();
+    SL.makeComp(dd, "FeedLN", 300, 270, 0, "");
+    const mm = SL.makeComp(dd, "Motor1Cap", 300, 300, 0, "-M1");
+    if (aux === 1) SL.makeComp(dd, "FeedLN", 360, 270, 0, "");
+    if (aux === -1) { const f = SL.makeComp(dd, "FeedLN", 390, 270, 0, ""); f.mirror = true; }
+    const ss = new SL.Sim(dd); eq(ss.tick(dd, 0.1), null);
+    return [ss.st[mm.id].motor, !!ss.st[mm.id].twoPhase];
+  };
+  eq(cap(1), [1, false]); eq(cap(-1), [-1, false], "Z1/Z2 swapped reverses"); eq(cap(0), [0, true], "no auxiliary winding: hums");
+
+  // Dahlander
+  const dahl = (high) => {
+    const dd = SL.newDoc();
+    const mm = SL.makeComp(dd, "Motor3Dahl", 150, 300, 0, "-M1"); // 1U..1W 150..210, 2U..2W 240..300
+    if (!high) { SL.makeComp(dd, "FeedL123", 150, 120, 0, ""); [150, 180, 210].forEach((x) => W(dd, [x, 150], [x, 300])); }
+    else { SL.makeComp(dd, "FeedL123", 240, 120, 0, ""); [240, 270, 300].forEach((x) => W(dd, [x, 150], [x, 300])); if (high === 2) W(dd, [150, 300], [210, 300]); }
+    const ss = new SL.Sim(dd); eq(ss.tick(dd, 0.1), null);
+    return [ss.st[mm.id].motor, ss.st[mm.id].conn || 0];
+  };
+  eq(dahl(0), [1, 1], "low speed"); eq(dahl(2), [1, 2], "high speed (YY)"); eq(dahl(1), [0, 0], "high without joining 1U-1V-1W");
+
+  // wound rotor with a resistor step bridged by a contactor
+  const wr = (bridge, star) => {
+    const dd = SL.newDoc();
+    SL.makeComp(dd, "FeedL123", 150, 120, 0, "");
+    const mm = SL.makeComp(dd, "Motor3WR", 150, 150, 0, "-M1");   // K L M at (150|180|210, 270)
+    SL.makeComp(dd, "Resistor3", 150, 270, 0, "-R1");               // to (x, 330)
+    if (star) W(dd, [150, 330], [210, 330]);
+    SL.makeComp(dd, "Contactor3", 150, 270, 0, "-KM9");
+    if (bridge) { SL.makeComp(dd, "FeedLN", 600, 120, 0, ""); SL.makeComp(dd, "Coil", 600, 150, 0, "-KM9"); W(dd, [600, 210], [630, 210]); W(dd, [630, 150], [630, 210]); }
+    const ss = new SL.Sim(dd); eq(ss.tick(dd, 0.1), null);
+    return [ss.st[mm.id].motor, ss.st[mm.id].steps || 0, !!ss.st[mm.id].rotorOpen];
+  };
+  eq(wr(false, true), [1, 1, false], "starts with one resistor step");
+  eq(wr(true, true), [1, 0, false], "step bridged: full speed");
+  eq(wr(false, false), [0, 0, true], "open rotor: does not start");
+});
+
+test("braked motor trips the overload relay; ramps", () => {
+  const d = SL.exampleDoc(), id = (k, n) => d.comps.find((c) => c.kind === k && c.name === n).id;
+  const s = new SL.Sim(d), m = id("Motor3", "-M1"), f1 = id("ThermalRelay3", "-F1"), s1 = id("PushNO", "-S1");
+  s.tick(d, 0.1); s.setActuator(d, s1, true); s.tick(d, 0.1); s.setActuator(d, s1, false);
+  for (let i = 0; i < 3; i++) s.tick(d, 0.1);
+  eq(s.st[m].spd > 0.4 && s.st[m].spd < 0.76, true, "accelerating direct-on-line");
+  for (let i = 0; i < 10; i++) s.tick(d, 0.1);
+  eq(Math.abs(s.st[m].spd - 0.75) < 1e-9, true, "full speed");
+  s.toggleBrake(d, m);
+  for (let i = 0; i < 40; i++) s.tick(d, 0.1);
+  eq(s.st[f1].act, false, "not yet after 4 s");
+  for (let i = 0; i < 15; i++) s.tick(d, 0.1);
+  eq([s.st[f1].act, s.st[m].motor], [true, 0], "tripped after ~5 s and the motor stops");
+  eq(s.log.some((e) => /frenat/.test(e.text)), true, "logged");
+
+  // soft starter: 2 s ramp
+  const d2 = SL.newDoc();
+  SL.makeComp(d2, "FeedL123", 150, 120, 0, "");
+  SL.makeComp(d2, "SoftStarter3", 150, 150, 0, "-G1", { time_base: 2, time_mult: 1 });
+  const m2 = SL.makeComp(d2, "Motor3", 150, 210, 0, "-M1");
+  SL.makeComp(d2, "FeedLN", 600, 120, 0, "");
+  const ctl = SL.makeComp(d2, "SoftCtrl", 600, 150, 0, "-G1");
+  eq(SL.terminals(ctl), [[600, 150], [630, 150]], "control A1/A2 sit on the feed");
+  const s2 = new SL.Sim(d2); eq(s2.tick(d2, 0.1), null);
+  eq(s2.st[m2.id].motor, 1, "motor fed through the soft starter");
+  for (let i = 0; i < 9; i++) s2.tick(d2, 0.1);
+  eq(s2.st[m2.id].rampT, 2, "ramp time from the starter");
+  eq(s2.st[m2.id].spd > 0.4 && s2.st[m2.id].spd < 0.6, true, "half speed after 1 s of a 2 s ramp: " + s2.st[m2.id].spd);
+});
+
+test("sheets and continuation markers", () => {
+  const d = SL.newDoc();
+  d.page.count = 2;
+  const y2 = SL.sheetY(d, 1);                       // top of sheet 2
+  eq(SL.sheetOf(d, [100, 100]), 1); eq(SL.sheetOf(d, [100, y2 + 100]), 2);
+  SL.makeComp(d, "FeedLN", 300, 120, 0, "");       // L (300,150) N (330,150)
+  SL.makeComp(d, "Continuation", 300, 210, 0, "C1"); SL.makeComp(d, "Continuation", 330, 210, 0, "C2");
+  SL.addWire(d, [300, 150], [300, 210]); SL.addWire(d, [330, 150], [330, 210]);
+  const h = SL.makeComp(d, "Lamp", 300, y2 + 210, 0, "-H1");          // on sheet 2
+  SL.makeComp(d, "Continuation", 300, y2 + 150, 0, "C1"); SL.makeComp(d, "Continuation", 360, y2 + 150, 0, "C2");
+  SL.addWire(d, [300, y2 + 150], [300, y2 + 210]);
+  SL.addWire(d, [300, y2 + 270], [360, y2 + 270]); SL.addWire(d, [360, y2 + 270], [360, y2 + 150]);
+  const s = new SL.Sim(d); eq(s.tick(d, 0.1), null);
+  eq(s.st[h.id].energized, true, "lamp on sheet 2 fed from sheet 1 through C1/C2");
+  eq(SL.colRef(d, [300, y2 + 200]), "2.2", "sheet.column reference");
+  // an element can be moved onto the second sheet
+  const r = SL.moveItems(d, new Set([h.id]), 0, 60);
+  eq(r.disconnected, false, "moves within sheet 2");
+});
+
+test("labels never sit on the conductor of a horizontal element", () => {
+  const d = SL.newDoc();
+  const v = SL.makeComp(d, "AuxNO", 300, 300, 0, "-KM1");
+  const hz = SL.makeComp(d, "AuxNO", 300, 600, 1, "-KM1");
+  eq(SL.isHorizontal(v), false); eq(SL.isHorizontal(hz), true);
+  // the name of a horizontal element goes above it, clear of the conductor that runs through its middle
+  const r = SL.compRect(hz), lr = SL.labelRect(hz), ts = SL.terminals(hz);
+  eq(lr.y1 <= r.y0, true, "label above the symbol");
+  eq(ts.every((p) => p[1] > lr.y1), true, "conductor row below the label");
+  const lv = SL.labelRect(v), rv = SL.compRect(v);
+  eq(lv.x1 <= rv.x0, true, "vertical element: label on the left");
+  hz.lx = 30; hz.ly = -15;
+  const moved = SL.labelRect(hz);
+  eq([moved.x0 - lr.x0, moved.y0 - lr.y0], [30, -15], "label can be dragged");
+});
+
+test("event log and timing signals", () => {
+  const d = SL.exampleDoc(), id = (k, n) => d.comps.find((c) => c.kind === k && c.name === n).id;
+  const s = new SL.Sim(d), s1 = id("PushNO", "-S1");
+  s.tick(d, 0.1); s.setActuator(d, s1, true); s.tick(d, 0.1); s.setActuator(d, s1, false); s.tick(d, 0.1);
+  const txt = s.log.map((e) => e.text);
+  eq(txt.includes("-S1 premut") && txt.includes("-S1 deixat anar"), true, "button logged");
+  eq(txt.some((t) => /^-KM1 s'excita/.test(t)), true, "coil logged");
+  eq(txt.some((t) => /^-M1 arrenca/.test(t)), true, "motor logged");
+  eq(s.sig[id("Coil", "-KM1")].changes.map((c) => c[1]), [0, 1], "timing chart transitions");
 });
 
 if (failed) { console.log(failed + " failed"); process.exit(1); }

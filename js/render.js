@@ -42,7 +42,17 @@
     String(s).split("\n").forEach(function (line, i) { g.fillText(line, p[0], p[1] + i * size * 1.1); });
   };
 
+  /** Draw every sheet of the document (stacked vertically). */
   R.prototype.page = function (doc, grid) {
+    var n = SL.sheetCount(doc), v = this.v;
+    for (var k = 0; k < n; k++) {
+      this.v = Object.assign({}, v, { panY: v.panY + SL.sheetY(doc, k) * v.zoom });
+      this.sheet(doc, grid, k, n);
+    }
+    this.v = v;
+  };
+
+  R.prototype.sheet = function (doc, grid, sheetNo, sheets) {
     var g = this.g, ps = SL.PAGE_SIZES[doc.page.size] || SL.PAGE_SIZES.A4Horizontal, W = ps.w, H = ps.h, self = this;
     var a = this.s([0, 0]), b = this.s([W, H]);
     g.fillStyle = "rgb(70,70,70)"; g.fillRect(a[0] + 4, a[1] + 4, b[0] - a[0], b[1] - a[1]);
@@ -94,6 +104,7 @@
       this.text(this.s([col2 + 6, ym + 14]), "Títol", tf * 0.8, "#555", "left");
       this.text(this.s([col2 + 6, ym + 45]), t.title || "", tf * 1.4, "#000", "left");
       this.text(this.s([W - inset - 8, ym + 14]), "Núm. " + (t.number || ""), tf, "#000", "right");
+      if (sheets > 1) this.text(this.s([W - inset - 8, Y0 + 14]), "Full " + (sheetNo + 1) + " / " + sheets, tf, "#000", "right");
     }
   };
 
@@ -182,20 +193,97 @@
       x1: Math.max.apply(null, corners.map(function (p) { return p[0]; })),
       y1: Math.max.apply(null, corners.map(function (p) { return p[1]; })),
     };
+    var tds = SL.terminalsWithDir(c);
     if (showTerms) {
       var fs = Math.max(4, 8 * this.v.zoom), midY = (bb[0][1] + bb[1][1]) / 2;
       if (fs >= 5) sym.terms.forEach(function (t, i) {
-        var lab = sym.tlabels[i];
+        var lab = sym.tlabels[i], td = tds[i];
         if (!lab) return;
-        self.text(tr([t[0] + 4, t[1] + (t[1] < midY ? 6 : -6)]), lab, fs, "rgb(0,0,128)", "left");
+        if (td && td.dir[0] && !td.dir[1]) {
+          // terminal leaving sideways: number above the conductor, just inside the symbol
+          self.text(self.s([td.pos[0] - td.dir[0] * 9, td.pos[1] - 6]), lab, fs, "rgb(0,0,128)", "center");
+        } else self.text(tr([t[0] + 4, t[1] + (t[1] < midY ? 6 : -6)]), lab, fs, "rgb(0,0,128)", "left");
       });
     }
+    var lp = SL.labelPlace(c);
     if (c.name) {
-      var label = c.func ? c.name + "\n" + c.func : c.name;
-      this.text([box.x0 - 4, (box.y0 + box.y1) / 2], label, Math.max(5, 11 * this.v.zoom), "#000", "right");
+      var label = c.func ? c.name + "\n" + c.func : c.name, lfs = Math.max(5, 11 * this.v.zoom);
+      var lsp = this.s(lp.name.p);
+      if (lp.name.base === "bottom" && c.func) lsp[1] -= lfs * 1.1; // keep both lines above the symbol
+      this.text(lsp, label, lfs, "#000", lp.name.align, lp.name.base);
     }
-    if (extra) this.text([box.x1 + 3, (box.y0 + box.y1) / 2], extra, Math.max(5, 9 * this.v.zoom), "rgb(0,0,160)", "left");
+    if (extra) this.text(this.s(lp.extra.p), extra, Math.max(5, 9 * this.v.zoom), "rgb(0,0,160)", lp.extra.align, lp.extra.base);
     return box;
+  };
+
+  /**
+   * Page column (1..n, as numbered in the reference band) of a world point,
+   * prefixed by the sheet number when the schematic has several sheets ("2.3").
+   */
+  SL.colRef = function (doc, p) {
+    var ps = SL.PAGE_SIZES[doc.page.size] || SL.PAGE_SIZES.A4Horizontal, inset = 25;
+    var ncol = Math.max(1, Math.round((ps.w - 2 * inset) / 180)), cwid = (ps.w - 2 * inset) / ncol;
+    var col = Math.min(ncol, Math.max(1, Math.floor((p[0] - inset) / cwid) + 1));
+    if (SL.sheetCount(doc) > 1) {
+      var sheet = SL.sheetOf(doc, p);
+      return sheet + "." + col;
+    }
+    return String(col);
+  };
+
+  /** Cross-reference lines for a coil: its contacts and poles with their terminals and column. */
+  SL.crossRefs = function (doc, coil) {
+    var out = [];
+    doc.comps.forEach(function (c) {
+      var K = SL.KINDS[c.kind];
+      if (c === coil || c.name !== coil.name || (K.role !== "Contact" && K.role !== "Poles")) return;
+      var tl = SL.baseSymbol(c.kind).tlabels, txt;
+      if (/CO$/.test(c.kind) && tl.length === 3) txt = tl[0] + "-" + tl[1] + "/" + tl[2];
+      else {
+        var pairs = [];
+        for (var i = 0; i + 1 < tl.length; i += 2) pairs.push(tl[i] + "-" + tl[i + 1]);
+        txt = K.role === "Poles" && !/^\d/.test(tl[0] || "") ? "potència" : pairs.join(" ");
+      }
+      var r = SL.compRect(c);
+      out.push({ text: txt + " /" + SL.colRef(doc, [(r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2]), poles: K.role === "Poles", y: r.y0, x: r.x0 });
+    });
+    // power poles first, then contacts in reading order
+    out.sort(function (a, b) { return (b.poles - a.poles) || (a.x - b.x) || (a.y - b.y); });
+    return out.map(function (o) { return o.text; });
+  };
+
+  /** True when the element's terminals leave sideways (a horizontal element): labels go above/below. */
+  SL.isHorizontal = function (c) {
+    return SL.terminalsWithDir(c).some(function (td) { return td.dir[0] !== 0; });
+  };
+
+  /**
+   * Where the name and the extra text (times, counts) go, in world units, so they
+   * never sit on a conductor: left of vertical elements, above horizontal ones.
+   * c.lx / c.ly move the name (dragged by the user).
+   */
+  SL.labelPlace = function (c) {
+    var r = SL.compRect(c), lx = c.lx || 0, ly = c.ly || 0;
+    if (SL.isHorizontal(c)) {
+      return {
+        name: { p: [(r.x0 + r.x1) / 2 + lx, r.y0 - 3 + ly], align: "center", base: "bottom" },
+        extra: { p: [(r.x0 + r.x1) / 2, r.y1 + 3], align: "center", base: "top" },
+      };
+    }
+    return {
+      name: { p: [r.x0 - 4 + lx, (r.y0 + r.y1) / 2 + ly], align: "right", base: "middle" },
+      extra: { p: [r.x1 + 3, (r.y0 + r.y1) / 2], align: "left", base: "middle" },
+    };
+  };
+
+  /** Approximate world rectangle of the name label (for clicking and dragging it). */
+  SL.labelRect = function (c) {
+    if (!c.name) return null;
+    var lp = SL.labelPlace(c).name, lines = c.func ? 2 : 1;
+    var w = Math.max(c.name.length, (c.func || "").length) * 6.6, h = 12 * lines;
+    var x0 = lp.align === "right" ? lp.p[0] - w : lp.align === "center" ? lp.p[0] - w / 2 : lp.p[0];
+    var y0 = lp.base === "bottom" ? lp.p[1] - h : lp.base === "top" ? lp.p[1] : lp.p[1] - h / 2;
+    return { x0: x0, y0: y0, x1: x0 + w, y1: y0 + h };
   };
 
   /** Draw a symbol fitted into a small canvas (toolbar icons). */
@@ -205,7 +293,7 @@
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
-    var sym = SL.buildSymbol(kind, {}), bb = SL.symBBox(sym);
+    var sym = SL.baseSymbol(kind), bb = SL.symBBox(sym);
     var sw = Math.max(1, bb[1][0] - bb[0][0]), sh = Math.max(1, bb[1][1] - bb[0][1]);
     var zoom = Math.min((w - 6) / sw, (h - 6) / sh);
     var cx = (bb[0][0] + bb[1][0]) / 2, cy = (bb[0][1] + bb[1][1]) / 2;
