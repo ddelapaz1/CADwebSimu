@@ -11,14 +11,25 @@
 <body>
 <div id="app">
   <nav id="menubar"></nav>
-  <div id="toolbar1" class="toolbar"></div>
-  <div id="toolbar2" class="toolbar"></div>
-  <div id="catbar" class="toolbar"></div>
+  <div id="dock-top" class="dock-zone dock-h">
+    <div id="toolbar1" class="toolbar"></div>
+    <div id="toolbar2" class="toolbar"></div>
+    <div id="catbar" class="toolbar"></div>
+  </div>
+  <div id="workspace">
+    <div id="dock-left" class="dock-zone dock-v"></div>
+    <div id="center-pane">
+      <div id="modebar"></div>
+      <div id="tabs"></div>
+      <div id="canvaswrap"><canvas id="canvas" tabindex="0"></canvas><div id="props" hidden></div><canvas id="minimap" hidden></canvas></div>
+    </div>
+    <div id="dock-right" class="dock-zone dock-v"></div>
+  </div>
+  <div id="dock-bottom" class="dock-zone dock-h"></div>
   <div id="symbar" class="toolbar symbar" hidden></div>
   <div id="sym-popover" hidden></div>
-  <div id="modebar"></div>
-  <div id="tabs"></div>
-  <div id="canvaswrap"><canvas id="canvas" tabindex="0"></canvas><div id="props" hidden></div><canvas id="minimap" hidden></canvas></div>
+  <div id="dock-preview" hidden></div>
+  <div id="tb-live" class="visually-hidden" aria-live="polite"></div>
   <footer id="statusbar">
     <span id="status">Preparat</span>
     <span class="right"><span id="legend" hidden></span><span id="mode">Edició</span><span id="simtime"></span><span id="zoom"></span><span id="coords"></span></span>

@@ -13,11 +13,27 @@
     ["circle", "En cercle", "◎"],
   ];
 
+  var BAR_META = {
+    toolbar1: { label: "Barra d'eines principal", defOrder: 0 },
+    toolbar2: { label: "Barra de dibuix", defOrder: 1 },
+    catbar:   { label: "Barra de símbols", defOrder: 2 },
+  };
+  var BAR_IDS = ["toolbar1", "toolbar2", "catbar"];
+  var DOCK_LABELS = { top: "a dalt", left: "a l'esquerra", right: "a la dreta", bottom: "a baix", float: "flotant" };
+  function defaultBars() {
+    return {
+      toolbar1: { visible: true, dock: "top", x: 16, y: 60, floatOrient: "horizontal", order: 0 },
+      toolbar2: { visible: true, dock: "top", x: 16, y: 110, floatOrient: "horizontal", order: 1 },
+      catbar:   { visible: true, dock: "top", x: 16, y: 160, floatOrient: "horizontal", order: 2 },
+    };
+  }
+
   var A = SL.app = {
     tabs: [], active: 0, tool: { t: "select" }, placeRot: 0, placeMirror: false, cat: "Feeds",
     openCat: null, radialMenu: null, deployMode: "grid",
     sel: new Set(), drag: null, wireFrom: null, hover: null, clip: null, pasteN: 0,
     grid: true, showToolbar: true, showStatus: true, showSymbars: true,
+    bars: defaultBars(),
     drawColor: [0, 0, 0], fillColor: [255, 255, 200], drawWidth: 1, docCounter: 1,
     pressed: null, lastT: null, needsDraw: true, dialogOpen: false,
   };
@@ -74,7 +90,7 @@
 
   function savePrefs() {
     try {
-      localStorage.setItem(PREF_STORE, JSON.stringify({ deployMode: A.deployMode }));
+      localStorage.setItem(PREF_STORE, JSON.stringify({ deployMode: A.deployMode, bars: A.bars }));
     } catch (e) { /* storage full or blocked */ }
   }
   function loadPrefs() {
@@ -82,6 +98,22 @@
       var p = JSON.parse(localStorage.getItem(PREF_STORE) || "null");
       if (p && DEPLOY_MODES.some(function (m) { return m[0] === p.deployMode; })) {
         A.deployMode = p.deployMode;
+      }
+      if (p && p.bars && typeof p.bars === "object") {
+        var defs = defaultBars();
+        BAR_IDS.forEach(function (id) {
+          var b = p.bars[id], d = defs[id];
+          if (!b || typeof b !== "object") return;
+          var validDock = b.dock === "top" || b.dock === "left" || b.dock === "right" || b.dock === "bottom" || b.dock === "float";
+          A.bars[id] = {
+            visible: typeof b.visible === "boolean" ? b.visible : d.visible,
+            dock: validDock ? b.dock : d.dock,
+            x: typeof b.x === "number" ? b.x : d.x,
+            y: typeof b.y === "number" ? b.y : d.y,
+            floatOrient: b.floatOrient === "vertical" ? "vertical" : "horizontal",
+            order: typeof b.order === "number" ? b.order : d.order,
+          };
+        });
       }
     } catch (e) { /* ignore */ }
   }
@@ -701,9 +733,18 @@
     tipEl.classList.add("visible");
     var r = target.getBoundingClientRect();
     var tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
-    var left = Math.max(6, Math.min(window.innerWidth - tw - 6, r.left + r.width / 2 - tw / 2));
-    var top = r.bottom + 7;
-    if (top + th > window.innerHeight - 6) top = r.top - th - 7;
+    var vBar = target.closest && target.closest(".toolbar.vertical");
+    var left, top;
+    if (vBar) {
+      var onLeft = r.left + r.width / 2 < window.innerWidth / 2;
+      left = onLeft ? r.right + 7 : r.left - tw - 7;
+      left = Math.max(6, Math.min(window.innerWidth - tw - 6, left));
+      top = Math.max(6, Math.min(window.innerHeight - th - 6, r.top + r.height / 2 - th / 2));
+    } else {
+      left = Math.max(6, Math.min(window.innerWidth - tw - 6, r.left + r.width / 2 - tw / 2));
+      top = r.bottom + 7;
+      if (top + th > window.innerHeight - 6) top = r.top - th - 7;
+    }
     tipEl.style.left = Math.round(left) + "px";
     tipEl.style.top = Math.round(top) + "px";
   }
@@ -730,9 +771,278 @@
   }
   function sep() { return el("span", { class: "sep" }); }
 
+  var liveTimer = null;
+  function announceBar(text) {
+    var live = $("tb-live");
+    if (!live) return;
+    live.textContent = text;
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(function () { if (live) live.textContent = ""; }, 1200);
+  }
+
+  function clampFloatingBar(id, bar) {
+    var cfg = A.bars[id];
+    var maxLeft = Math.max(0, window.innerWidth - (bar.offsetWidth || 48));
+    var maxTop = Math.max(0, window.innerHeight - (bar.offsetHeight || 48));
+    cfg.x = Math.max(0, Math.min(maxLeft, Math.round(cfg.x)));
+    cfg.y = Math.max(0, Math.min(maxTop, Math.round(cfg.y)));
+    bar.style.left = cfg.x + "px";
+    bar.style.top = cfg.y + "px";
+  }
+
+  function detectDockZone(cx, cy) {
+    var menuEl = $("menubar");
+    var statusEl = $("statusbar");
+    var menuBottom = menuEl ? menuEl.getBoundingClientRect().bottom : 0;
+    var statusTop = (statusEl && !statusEl.hidden) ? statusEl.getBoundingClientRect().top : window.innerHeight;
+    if (cx <= 56) return "left";
+    if (cx >= window.innerWidth - 56) return "right";
+    if (cy <= menuBottom + 44) return "top";
+    if (cy >= statusTop - 44) return "bottom";
+    return "float";
+  }
+
+  function updateDockPreview(zone) {
+    var prev = $("dock-preview");
+    if (!prev) return;
+    if (!zone || zone === "float") { prev.hidden = true; return; }
+    var menuEl = $("menubar");
+    var statusEl = $("statusbar");
+    var topY = menuEl ? menuEl.getBoundingClientRect().bottom : 0;
+    var botY = (statusEl && !statusEl.hidden) ? statusEl.getBoundingClientRect().top : window.innerHeight;
+    var h = Math.max(40, botY - topY);
+    prev.hidden = false;
+    if (zone === "top") {
+      prev.style.left = "4px"; prev.style.top = (topY + 2) + "px";
+      prev.style.width = (window.innerWidth - 8) + "px"; prev.style.height = "38px";
+    } else if (zone === "bottom") {
+      prev.style.left = "4px"; prev.style.top = (botY - 40) + "px";
+      prev.style.width = (window.innerWidth - 8) + "px"; prev.style.height = "38px";
+    } else if (zone === "left") {
+      prev.style.left = "2px"; prev.style.top = (topY + 2) + "px";
+      prev.style.width = "46px"; prev.style.height = (h - 4) + "px";
+    } else if (zone === "right") {
+      prev.style.left = (window.innerWidth - 48) + "px"; prev.style.top = (topY + 2) + "px";
+      prev.style.width = "46px"; prev.style.height = (h - 4) + "px";
+    }
+  }
+
+  function wireToolbarFocus(bar) {
+    if ("focusGroup" in HTMLElement.prototype || bar._focusWired) return;
+    bar._focusWired = true;
+    function getItems() {
+      return [].slice.call(bar.querySelectorAll("button:not([hidden]), select:not([hidden]), input:not([hidden])"));
+    }
+    bar.addEventListener("focusin", function (e) {
+      var items = getItems();
+      if (items.indexOf(e.target) >= 0) {
+        items.forEach(function (b) { b.tabIndex = b === e.target ? 0 : -1; });
+      }
+    });
+    bar.addEventListener("keydown", function (e) {
+      var items = getItems();
+      var idx = items.indexOf(document.activeElement);
+      if (idx < 0) return;
+      var vertical = bar.getAttribute("aria-orientation") === "vertical";
+      var rtl = getComputedStyle(bar).direction === "rtl";
+      var step = 0;
+      if (vertical) {
+        if (e.key === "ArrowDown") step = 1;
+        else if (e.key === "ArrowUp") step = -1;
+      } else {
+        if (e.key === "ArrowRight") step = rtl ? -1 : 1;
+        else if (e.key === "ArrowLeft") step = rtl ? 1 : -1;
+      }
+      if (e.key === "Home") step = -idx;
+      else if (e.key === "End") step = items.length - 1 - idx;
+      else if (!step) return;
+      e.preventDefault();
+      var next = items[(idx + step + items.length) % items.length];
+      if (next) next.focus();
+    });
+  }
+
+  function syncToolbarTabIndex(bar) {
+    if ("focusGroup" in HTMLElement.prototype) return;
+    var items = [].slice.call(bar.querySelectorAll("button:not([hidden]), select:not([hidden]), input:not([hidden])"));
+    var active = items.indexOf(document.activeElement);
+    items.forEach(function (b, i) { b.tabIndex = (active >= 0 ? i === active : i === 0) ? 0 : -1; });
+  }
+
+  function applyBarLayout(skipResize) {
+    var ordered = BAR_IDS.slice().sort(function (a, b) { return A.bars[a].order - A.bars[b].order; });
+    ordered.forEach(function (id) {
+      var bar = $(id), cfg = A.bars[id];
+      if (!bar) return;
+      var isVert = cfg.dock === "left" || cfg.dock === "right" || (cfg.dock === "float" && cfg.floatOrient === "vertical");
+      bar.hidden = !cfg.visible;
+      bar.classList.toggle("vertical", isVert);
+      bar.classList.toggle("floating", cfg.dock === "float");
+      bar.setAttribute("role", "toolbar");
+      bar.setAttribute("aria-label", BAR_META[id].label);
+      bar.setAttribute("aria-orientation", isVert ? "vertical" : "horizontal");
+      bar.setAttribute("focusgroup", isVert ? "toolbar wrap block" : "toolbar wrap");
+      [].forEach.call(bar.querySelectorAll(".sep"), function (sp) {
+        sp.setAttribute("role", "separator");
+        sp.setAttribute("aria-orientation", isVert ? "horizontal" : "vertical");
+      });
+      if (cfg.dock === "float") {
+        var app = $("app");
+        if (bar.parentElement !== app) app.appendChild(bar);
+        clampFloatingBar(id, bar);
+      } else {
+        bar.style.left = "";
+        bar.style.top = "";
+        var zone = $("dock-" + cfg.dock) || $("dock-top");
+        if (zone) zone.appendChild(bar);
+      }
+      wireToolbarFocus(bar);
+      syncToolbarTabIndex(bar);
+    });
+    A.showToolbar = A.bars.toolbar1.visible || A.bars.toolbar2.visible;
+    A.showSymbars = A.bars.catbar.visible;
+    if (!skipResize) window.dispatchEvent(new Event("resize"));
+  }
+
+  function setBarVisible(id, vis) {
+    A.bars[id].visible = vis;
+    if (id === "catbar" && !vis) A.openCat = null;
+    savePrefs();
+    renderToolbars();
+    renderCatbar();
+    renderSymbars();
+    announceBar(BAR_META[id].label + (vis ? " visible" : " amagada"));
+  }
+
+  function setBarDock(id, dock, x, y) {
+    var cfg = A.bars[id];
+    cfg.dock = dock;
+    if (typeof x === "number") cfg.x = x;
+    if (typeof y === "number") cfg.y = y;
+    savePrefs();
+    renderToolbars();
+    renderCatbar();
+    if (A.openCat || A.radialMenu) renderSymbars();
+    announceBar(BAR_META[id].label + " " + (DOCK_LABELS[dock] || dock));
+  }
+
+  function resetBars() {
+    A.bars = defaultBars();
+    savePrefs();
+    renderToolbars();
+    renderCatbar();
+    if (A.openCat || A.radialMenu) renderSymbars();
+    announceBar("Posició de les barres restablerta");
+  }
+
+  function makeBarHandle(id) {
+    var label = "Mou " + BAR_META[id].label + " (fletxes per moure, doble clic per girar)";
+    var h = el("button", {
+      type: "button",
+      class: "tb-handle",
+      "aria-label": label,
+      html: "<svg aria-hidden='true' viewBox='0 0 10 16'><circle cx='3' cy='3' r='1.2'/><circle cx='7' cy='3' r='1.2'/><circle cx='3' cy='8' r='1.2'/><circle cx='7' cy='8' r='1.2'/><circle cx='3' cy='13' r='1.2'/><circle cx='7' cy='13' r='1.2'/></svg>",
+    });
+    attachTip(h, "Arrossega per moure o ancorar als laterals (doble clic si és flotant per girar)");
+
+    var st = null;
+    h.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return;
+      hideTip();
+      var bar = $(id);
+      var rect = bar.getBoundingClientRect();
+      st = {
+        id: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        offsetX: e.clientX - rect.left,
+        offsetY: e.clientY - rect.top,
+        dragging: false,
+        zone: A.bars[id].dock,
+      };
+      h.setPointerCapture(e.pointerId);
+    });
+    h.addEventListener("pointermove", function (e) {
+      if (!st || !h.hasPointerCapture(e.pointerId)) return;
+      var bar = $(id);
+      if (!st.dragging) {
+        if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) < 4) return;
+        st.dragging = true;
+        h.classList.add("dragging");
+        var rect = bar.getBoundingClientRect();
+        A.bars[id].dock = "float";
+        A.bars[id].x = rect.left;
+        A.bars[id].y = rect.top;
+        bar.classList.add("floating");
+        $("app").appendChild(bar);
+        clampFloatingBar(id, bar);
+      }
+      A.bars[id].x = e.clientX - st.offsetX;
+      A.bars[id].y = e.clientY - st.offsetY;
+      clampFloatingBar(id, bar);
+      st.zone = detectDockZone(e.clientX, e.clientY);
+      updateDockPreview(st.zone);
+    });
+    function finishDrag() {
+      if (!st) return;
+      var wasDragging = st.dragging, zone = st.zone;
+      st = null;
+      h.classList.remove("dragging");
+      updateDockPreview(null);
+      if (wasDragging) {
+        setBarDock(id, zone, A.bars[id].x, A.bars[id].y);
+      }
+    }
+    h.addEventListener("lostpointercapture", finishDrag);
+    h.addEventListener("dblclick", function (e) {
+      e.stopPropagation();
+      if (A.bars[id].dock === "float") {
+        A.bars[id].floatOrient = A.bars[id].floatOrient === "vertical" ? "horizontal" : "vertical";
+        savePrefs();
+        applyBarLayout();
+        if (id === "catbar" && (A.openCat || A.radialMenu)) renderSymbars();
+      }
+    });
+    h.addEventListener("keydown", function (e) {
+      var dx = 0, dy = 0;
+      if (e.key === "ArrowLeft") dx = -15;
+      else if (e.key === "ArrowRight") dx = 15;
+      else if (e.key === "ArrowUp") dy = -15;
+      else if (e.key === "ArrowDown") dy = 15;
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+      var bar = $(id);
+      if (A.bars[id].dock !== "float") {
+        var r = bar.getBoundingClientRect();
+        A.bars[id].dock = "float";
+        A.bars[id].x = r.left;
+        A.bars[id].y = r.top;
+      }
+      A.bars[id].x += dx;
+      A.bars[id].y += dy;
+      savePrefs();
+      applyBarLayout();
+      if (h.isConnected) h.focus();
+    });
+    return h;
+  }
+
+  function makeBarClose(id) {
+    var b = el("button", {
+      type: "button",
+      class: "tb-close",
+      text: "×",
+      on: { click: function (e) { e.stopPropagation(); hideTip(); setBarVisible(id, false); } },
+    });
+    attachTip(b, "Amaga " + BAR_META[id].label);
+    return b;
+  }
+
   function renderToolbars() {
     var t = A.tab(), mode = t.mode, T = A.tool;
     var a = $("toolbar1"); a.innerHTML = "";
+    a.appendChild(makeBarHandle("toolbar1"));
     [tb("new", "Nou", A.newDoc), tb("open", "Obre", A.open), tb("save", "Desa", A.save), tb("print", "Imprimeix", A.print), sep(),
       tb("cut", "Retalla", A.cut), tb("copy", "Copia", A.copy), tb("paste", "Enganxa", A.paste), sep(),
       tb("zoomin", "Zoom +", function () { A.zoomCenter(1.25); }), tb("zoomout", "Zoom -", function () { A.zoomCenter(0.8); }),
@@ -745,7 +1055,10 @@
       tb("play", "Simulació (F5)", function () { A.startSim(false); }, mode === "sim"), tb("stop", "Stop / Edició", A.stopSim, mode === "edit"),
       tb("pause", "Pausa", A.pause, mode === "pause"), tb("step", "Pas a pas", A.step), tb("all", "Simula tots els documents", function () { A.startSim(true); }), sep(),
       tb("prefs", "Preferències", A.prefsDialog), tb("info", "Quant a", A.about)].forEach(function (x) { a.appendChild(x); });
+    if (A.bars.toolbar1.dock === "float") a.appendChild(makeBarClose("toolbar1"));
+
     var b = $("toolbar2"); b.innerHTML = "";
+    b.appendChild(makeBarHandle("toolbar2"));
     b.appendChild(tb("select", "Selecciona", function () { A.setTool({ t: "select" }); }, T.t === "select"));
     b.appendChild(tb("wire", "Cable (connecta terminals)", function () { A.setTool({ t: "wire" }); }, T.t === "wire"));
     b.appendChild(sep());
@@ -766,7 +1079,8 @@
     [1, 2, 3, 4].forEach(function (w) { var o = el("option", { value: String(w), text: "Gruix " + w }); if (w === A.drawWidth) o.selected = true; sel.appendChild(o); });
     sel.addEventListener("change", function () { A.drawWidth = +sel.value; });
     b.appendChild(sel);
-    $("toolbar1").hidden = $("toolbar2").hidden = !A.showToolbar;
+    if (A.bars.toolbar2.dock === "float") b.appendChild(makeBarClose("toolbar2"));
+    applyBarLayout();
   }
 
   function activeSymKind() {
@@ -855,6 +1169,7 @@
   function renderCatbar() {
     var c = $("catbar"), edit = A.tab().mode === "edit";
     c.innerHTML = "";
+    c.appendChild(makeBarHandle("catbar"));
     c.classList.toggle("sym-disabled", !edit);
     var activeKind = activeSymKind();
     SL.CATS.forEach(function (cat) {
@@ -881,11 +1196,12 @@
       on: { click: function (e) { e.stopPropagation(); A.prefsDialog(); } },
     }, [
       el("span", { text: modeMeta[2] }),
-      el("span", { text: modeMeta[1] }),
+      el("span", { class: "deploy-label", text: modeMeta[1] }),
     ]);
     attachTip(modeBtn, "Preferències: canvia el mode de desplegament d'icones");
     c.appendChild(modeBtn);
-    c.hidden = !A.showSymbars;
+    if (A.bars.catbar.dock === "float") c.appendChild(makeBarClose("catbar"));
+    applyBarLayout();
   }
 
   function buildCircleMenu(pop, cx, cy, bx, by, nodes, hubContent, hubTip, onHubClick) {
@@ -989,6 +1305,9 @@
     }
     var btnRect = catBtn.getBoundingClientRect();
     var barRect = $("catbar").getBoundingClientRect();
+    var isCatVert = $("catbar").classList.contains("vertical");
+    var openRight = barRect.left + barRect.width / 2 < window.innerWidth / 2;
+    var openAbove = !isCatVert && (barRect.top + barRect.height / 2 > window.innerHeight / 2);
     var bx = btnRect.left + btnRect.width / 2;
     var by = btnRect.top + btnRect.height / 2;
 
@@ -996,8 +1315,13 @@
 
     if (A.deployMode === "down") {
       var pw = 58;
-      var left = Math.max(8, Math.min(window.innerWidth - pw - 8, Math.round(bx - pw / 2)));
-      var top = Math.round(barRect.bottom + 5);
+      var estH = Math.min(window.innerHeight - 24, items.length * 51 + 14);
+      var left = isCatVert
+        ? Math.max(8, Math.min(window.innerWidth - pw - 8, openRight ? Math.round(barRect.right + 5) : Math.round(barRect.left - pw - 5)))
+        : Math.max(8, Math.min(window.innerWidth - pw - 8, Math.round(bx - pw / 2)));
+      var top = isCatVert
+        ? Math.max(8, Math.min(window.innerHeight - estH - 8, Math.round(by - 28)))
+        : (openAbove ? Math.max(8, Math.round(barRect.top - estH - 5)) : Math.round(barRect.bottom + 5));
       pop.style.left = left + "px";
       pop.style.top = top + "px";
       pop.style.setProperty("--top", top + "px");
@@ -1007,9 +1331,15 @@
     } else if (A.deployMode === "grid") {
       var n = items.length;
       var cols = n <= 3 ? n : n === 4 ? 2 : n <= 9 ? 3 : n <= 16 ? 4 : 5;
+      var rows = Math.ceil(n / cols);
       var gw = cols * 42 + (cols - 1) * 6 + 20;
-      var gLeft = Math.max(8, Math.min(window.innerWidth - gw - 8, Math.round(bx - gw / 2)));
-      var gTop = Math.round(barRect.bottom + 5);
+      var gh = rows * 46 + (rows - 1) * 6 + 44;
+      var gLeft = isCatVert
+        ? Math.max(8, Math.min(window.innerWidth - gw - 8, openRight ? Math.round(barRect.right + 5) : Math.round(barRect.left - gw - 5)))
+        : Math.max(8, Math.min(window.innerWidth - gw - 8, Math.round(bx - gw / 2)));
+      var gTop = isCatVert
+        ? Math.max(8, Math.min(window.innerHeight - gh - 8, Math.round(by - 28)))
+        : (openAbove ? Math.max(8, Math.round(barRect.top - gh - 5)) : Math.round(barRect.bottom + 5));
       pop.style.left = gLeft + "px";
       pop.style.top = gTop + "px";
       pop.style.setProperty("--origin-x", Math.round(bx - gLeft) + "px");
@@ -1031,13 +1361,18 @@
     } else if (A.deployMode === "circle") {
       var count = items.length;
       var radius = count <= 1 ? 50 : count <= 4 ? 58 : Math.max(68, Math.round((count * 54) / (2 * Math.PI)));
-      var cy = Math.round(barRect.bottom + radius + 34);
+      var cx = isCatVert
+        ? (openRight ? Math.round(barRect.right + radius + 34) : Math.round(barRect.left - radius - 34))
+        : bx;
+      var cy = isCatVert
+        ? Math.round(by)
+        : (openAbove ? Math.round(barRect.top - radius - 34) : Math.round(barRect.bottom + radius + 34));
       var shortLabel = catObj ? catObj.label.split(",")[0] : "";
       var topSymBtns = items.map(function (k, idx) {
         return makeSymBtn(k, idx);
       });
       buildCircleMenu(
-        pop, bx, cy, bx, by, topSymBtns,
+        pop, cx, cy, bx, by, topSymBtns,
         shortLabel,
         "Tanca " + (catObj ? catObj.label : ""),
         function () { A.closeSymDeploy(); }
@@ -1112,14 +1447,26 @@
         ["Cronograma", function () { A.showPanel(A.panelOpen("chrono") ? null : "chrono"); }, null, false, A.panelOpen && A.panelOpen("chrono")],
         ["Registre d'esdeveniments", function () { A.showPanel(A.panelOpen("log") ? null : "log"); }, null, false, A.panelOpen && A.panelOpen("log")]]],
       ["Barres", [
-        ["Barra d'eines", function () { A.showToolbar = !A.showToolbar; renderToolbars(); }, null, false, A.showToolbar],
-        ["Barra d'estat", function () { A.showStatus = !A.showStatus; $("statusbar").hidden = !A.showStatus; }, null, false, A.showStatus],
-        ["Barres de símbols", function () { A.showSymbars = !A.showSymbars; if (!A.showSymbars) A.openCat = null; renderCatbar(); renderSymbars(); }, null, false, A.showSymbars],
+        ["Barra d'eines principal", function () { setBarVisible("toolbar1", !A.bars.toolbar1.visible); }, null, false, A.bars.toolbar1.visible],
+        ["Barra de dibuix", function () { setBarVisible("toolbar2", !A.bars.toolbar2.visible); }, null, false, A.bars.toolbar2.visible],
+        ["Barra de símbols", function () { setBarVisible("catbar", !A.bars.catbar.visible); }, null, false, A.bars.catbar.visible],
+        ["Barra d'estat", function () { A.showStatus = !A.showStatus; $("statusbar").hidden = !A.showStatus; window.dispatchEvent(new Event("resize")); }, null, false, A.showStatus],
+        "-",
+        ["Posició de les barres", BAR_IDS.map(function (id) {
+          var b = A.bars[id];
+          return [BAR_META[id].label, [
+            ["A dalt (horitzontal)", function () { setBarDock(id, "top"); }, null, false, b.dock === "top"],
+            ["A l'esquerra (vertical)", function () { setBarDock(id, "left"); }, null, false, b.dock === "left"],
+            ["A la dreta (vertical)", function () { setBarDock(id, "right"); }, null, false, b.dock === "right"],
+            ["A baix (horitzontal)", function () { setBarDock(id, "bottom"); }, null, false, b.dock === "bottom"],
+            ["Flotant", function () { setBarDock(id, "float"); }, null, false, b.dock === "float"],
+          ]];
+        }).concat(["-", ["Restableix les posicions", resetBars]])],
         ["Desplegament d'icones", DEPLOY_MODES.map(function (m) {
           return [m[2] + " " + m[1], function () { A.setDeployMode(m[0], true); }, null, false, A.deployMode === m[0]];
         })],
         "-"]
-        .concat(SL.CATS.map(function (c) { return [c.bar, function () { A.showSymbars = true; A.toggleCat(c.id, true); }, null, false, A.openCat === c.id]; }))],
+        .concat(SL.CATS.map(function (c) { return [c.bar, function () { setBarVisible("catbar", true); A.toggleCat(c.id, true); }, null, false, A.openCat === c.id]; }))],
       ["Finestra", [["Nova finestra", A.newDoc], "-"].concat(A.tabs.map(function (tt, i) {
         return [(i + 1) + " " + tt.title, function () { A.active = i; A.sel.clear(); refreshAll(); }, null, false, i === A.active];
       }))],
@@ -1185,6 +1532,12 @@
     }
   });
   window.addEventListener("resize", function () {
+    BAR_IDS.forEach(function (id) {
+      if (A.bars[id].dock === "float" && A.bars[id].visible) {
+        var b = $(id);
+        if (b) clampFloatingBar(id, b);
+      }
+    });
     if (A.openCat || A.radialMenu) renderSymbars();
   });
 
