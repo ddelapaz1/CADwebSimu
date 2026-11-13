@@ -539,5 +539,22 @@ test("Prova drives Visualitza", () => {
   s.setActuator(d, pr.id, true); s.tick(d, 0); eq(s.st[v.id].cur, [true], "Visualitza shows 1");
 });
 
+test("a new element never repeats the name of another of the same type", () => {
+  const d = SL.newDoc();
+  SL.makeComp(d, "Coil", 600, 150, 0, "-KM2");
+  SL.makeComp(d, "Contactor3", 150, 150, 0, "-KM2");
+  SL.makeComp(d, "Contactor3", 300, 150, 0, "-KM3");
+  eq(SL.uniqueName(d, "Contactor3", "-KM2"), "-KM4", "skips every used number");
+  eq(SL.uniqueName(d, "Contactor1", "-KM2"), "-KM4", "any contactor counts");
+  eq(SL.uniqueName(d, "Coil", "-KM1"), "-KM1", "free name kept");
+  eq(SL.uniqueName(d, "Coil", "-KM2"), "-KM3", "a coil only clashes with coils");
+  SL.makeComp(d, "AuxNO", 600, 300, 0, "-KM2");
+  eq(SL.uniqueName(d, "AuxNO", "-KM2"), "-KM3", "second NO contact moves on");
+  eq(SL.uniqueName(d, "AuxNC", "-KM2"), "-KM2", "an NC of the same contactor is allowed");
+  SL.makeComp(d, "Lamp", 750, 150, 0, "-H1");
+  eq(SL.uniqueName(d, "Bell", "-H1"), "-H2", "signalling devices share -H");
+  eq(SL.uniqueName(d, "LogicAnd", ""), "", "unnamed elements stay unnamed");
+});
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");

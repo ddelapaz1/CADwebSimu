@@ -1165,6 +1165,28 @@ SL.nextName = function (doc, kind) {
   }
 };
 
+/**
+ * Two elements of the same type cannot share a name: contacts are compared by
+ * their exact kind (an NO and an NC of -KM1 can coexist), everything else by
+ * role and name prefix (any contactor, any pilot light...).
+ */
+SL.sameNameType = function (kindA, kindB) {
+  var a = SL.KINDS[kindA], b = SL.KINDS[kindB];
+  if (a.role === "Contact" || b.role === "Contact") return kindA === kindB;
+  return a.role === b.role && a.prefix === b.prefix;
+};
+
+/** `name`, or the next free number (-KM2 -> -KM3) if an element of the same type already uses it. */
+SL.uniqueName = function (doc, kind, name) {
+  if (!name) return name;
+  var m = /^(.*?)(\d+)$/.exec(name), base = m ? m[1] : name, n = m ? +m[2] : 1, cand = name;
+  var used = function (nm) {
+    return doc.comps.some(function (c) { return c.name === nm && SL.sameNameType(kind, c.kind); });
+  };
+  while (used(cand)) cand = base + (++n);
+  return cand;
+};
+
 SL.makeComp = function (doc, kind, x, y, rot, name, extra) {
   var c = {
     id: SL.newId(doc), kind: kind, x: x, y: y, rot: rot || 0, mirror: false,

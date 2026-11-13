@@ -297,7 +297,11 @@
     }
   };
   A.defaultName = function (kind) {
-    var doc = A.tab().doc, K = SL.KINDS[kind];
+    var doc = A.tab().doc;
+    return SL.uniqueName(doc, kind, proposedName(doc, kind));
+  };
+  function proposedName(doc, kind) {
+    var K = SL.KINDS[kind];
     if (K.role === "Feed" && !K.prefix) return "";
     if (K.role === "Contact" || K.role === "Poles") {
       var want = function (k) {
@@ -313,7 +317,7 @@
       return K.prefix + "1";
     }
     return SL.nextName(doc, kind);
-  };
+  }
   A.place = function (kind, x, y) {
     var name = A.defaultName(kind);
     A.checkpoint();
