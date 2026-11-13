@@ -53,6 +53,9 @@ Editor i simulador d'esquemes elèctrics de comandament i potència que funciona
 - `?ejemplo=2` arrencada estrella-triangle (afegiu `&simular=1` per veure'l en marxa)
 - `?ejemplo=3` inversió de gir d'un motor
 - `?ejemplo=4` marxa i aturada amb un LOGO!
+- `?ejemplo=5` semàfor amb un LOGO!, programa per GRAFCET (una etapa per biestable SR)
+- `?ejemplo=6` semàfor amb un LOGO!, programa per lògica cablada (tres temporitzadors encadenats)
+- `?ejemplo=7` semàfor amb relés i temporitzadors (lògica cablada)
 
 ## Proves
 `node test/sim.test.js`

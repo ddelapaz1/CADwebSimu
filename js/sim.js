@@ -135,14 +135,14 @@
         if (!inp && st.hold) { st.t += dt; if (st.t >= T) { st.hold = false; st.t = 0; } }
         break;
       case "LogicFlash":
-        if (inp) { st.t += dt; if (st.t >= Math.max(T, 0.05)) { st.t = 0; st.ph = st.ph === false; } }
+        if (inp) { st.t += dt; if (st.t >= Math.max(T, 0.05)) { st.t -= Math.max(T, 0.05); st.ph = st.ph === false; } }
         else { st.t = 0; st.ph = true; }
         break;
       case "LogicPulse":
         if (inp) {
           st.t += dt;
           if (st.pt > 0) st.pt -= dt;
-          if (st.t >= Math.max(T, 0.05)) { st.t = 0; st.pt = SL.LOGIC_PULSE; }
+          if (st.t >= Math.max(T, 0.05)) { st.t -= Math.max(T, 0.05); st.pt = SL.LOGIC_PULSE; }
         } else { st.t = 0; st.pt = 0; }
         break;
     }
@@ -169,7 +169,7 @@
         if (edge(0)) st.q = !st.q;
         if (b) st.q = false;
         return [!!st.q];
-      case "LogicTon": return [a && st.t >= T];
+      case "LogicTon": if (!a) st.t = 0; return [a && st.t >= T]; // drops: starts again from 0
       case "LogicTp":
         if (edge(0) && !st.pulse) { st.pulse = true; st.t = 0; }
         return [!!st.pulse];
@@ -566,6 +566,28 @@
     return { out: out, roots: roots, fault: fault };
   };
 
+  /**
+   * Fixed time step: simulated time advances in SIM_STEP slices whatever the
+   * frame rate, so flashers, pulse generators and counters behave the same on
+   * every computer. At most MAX_STEPS slices (or STEP_BUDGET ms of work) per
+   * call: a slow machine runs in slow motion instead of freezing.
+   */
+  SL.SIM_STEP = 0.01;  // s
+  var MAX_STEPS = 30, STEP_BUDGET = 10; // slices, ms
+  var clock = typeof performance !== "undefined" ? function () { return performance.now(); } : Date.now;
+  /** Advance dt seconds of real time in fixed steps; returns a fault name or null. */
+  Sim.prototype.advance = function (doc, dt) {
+    this.acc = (this.acc || 0) + dt;
+    var t0 = clock(), n = 0;
+    while (this.acc >= SL.SIM_STEP - 1e-9) {
+      if (n >= MAX_STEPS || (n && clock() - t0 > STEP_BUDGET)) { this.acc = 0; break; }
+      this.acc -= SL.SIM_STEP; n++;
+      var f = this.tick(doc, SL.SIM_STEP);
+      if (f) { this.acc = 0; return f; }
+    }
+    return null;
+  };
+
   /** Advance dt seconds; returns a fault name or null. */
   Sim.prototype.tick = function (doc, dt) {
     if (this.fault) return this.fault;
@@ -582,7 +604,7 @@
         if (st.energized) { st.t = 0; st.on = true; }
         else if (st.on) { st.t += dt; if (st.t >= preset) { st.on = false; st.t = 0; } }
       } else if (c.kind === "Flasher" || c.kind === "PulseGen") {
-        if (st.energized) { st.t += dt; if (st.t >= Math.max(preset, 0.05)) { st.t = 0; st.on = !st.on; } }
+        if (st.energized) { st.t += dt; if (st.t >= Math.max(preset, 0.05)) { st.t -= Math.max(preset, 0.05); st.on = !st.on; } }
         else { st.t = 0; st.on = false; }
       } else if (c.kind === "TimeSwitch" && c.ts_mode === "clock") {
         // daily program on an accelerated clock: ON between on_time and off_time
@@ -597,7 +619,7 @@
           st.phaseOn = per <= 0 || (st.t % per) < tOn;
         } else { st.t = 0; st.phaseOn = true; }
       } else if (c.kind === "LampFlash") {
-        if (st.energized) { st.t += dt; if (st.t >= 0.4) { st.t = 0; st.on = !st.on; } }
+        if (st.energized) { st.t += dt; if (st.t >= 0.4) { st.t -= 0.4; st.on = !st.on; } }
         else { st.t = 0; st.on = false; }
       }
       if (SL.KINDS[c.kind].role === "Logic") logicTime(c, st, dt);
@@ -773,7 +795,9 @@
               on = (st.count || 0) >= pre;
               break;
             }
-            case "TimerOn": on = e && st.on; break;
+            case "TimerOn":
+              if (!e) { st.t = 0; st.on = false; } // de-energized: the delay starts again from 0
+              on = e && st.on; break;
             case "TimerOff": on = e || st.on; break;
             case "TimerOnOff": on = st.on; break;
             case "Flasher": case "PulseGen": case "LampFlash": on = e && st.on; break;

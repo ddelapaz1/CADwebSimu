@@ -158,7 +158,7 @@
   };
   A.loadExample = function (which) {
     A.docCounter++;
-    var doc = which === 4 ? SL.exampleLogoDoc() : which === 3 ? SL.exampleRevDoc() : which === 2 ? SL.exampleYdDoc() : SL.exampleDoc();
+    var doc = which === 7 ? SL.exampleTrafficRelayDoc() : which === 6 ? SL.exampleTrafficWiredDoc() : which === 5 ? SL.exampleTrafficGrafcetDoc() : which === 4 ? SL.exampleLogoDoc() : which === 3 ? SL.exampleRevDoc() : which === 2 ? SL.exampleYdDoc() : SL.exampleDoc();
     A.tabs.push(newTab("Exemple" + A.docCounter, doc));
     A.active = A.tabs.length - 1;
     A.sel.clear();
@@ -389,7 +389,7 @@
     var t = A.tab();
     if (t.mode === "edit") return;
     t.mode = "pause";
-    var f = t.sim.tick(t.doc, STEP_SECS);
+    var f = t.sim.advance(t.doc, STEP_SECS);
     if (f) A.fault(t, f);
     refreshAll();
     A.simEvents(t);
@@ -423,7 +423,7 @@
     A.tabs.forEach(function (t) {
       if (t.mode !== "sim") return;
       any = true;
-      var f = t.sim.tick(t.doc, dt);
+      var f = t.sim.advance(t.doc, dt);
       if (f) A.fault(t, f);
       if (t === A.tab()) A.simEvents(t);
     });
@@ -1129,6 +1129,9 @@
           ["Motor - Inversió de gir", function () { A.loadExample(3); }],
           ["Motor - Arrencada estrella-triangle", function () { A.loadExample(2); }],
           ["LOGO! - Marxa i aturada amb autoretenció", function () { A.loadExample(4); }],
+          ["LOGO! - Semàfor (programa per GRAFCET)", function () { A.loadExample(5); }],
+          ["LOGO! - Semàfor (programa per lògica cablada)", function () { A.loadExample(6); }],
+          ["Relés - Semàfor (lògica cablada)", function () { A.loadExample(7); }],
         ]],
         "-",
         ["Quant a CADwebSimu...", A.about]]],
@@ -1244,7 +1247,7 @@
     loadPrefs();
     if (!restore()) A.tabs = [newTab("Esquema1", SL.newDoc())];
     var q = new URLSearchParams(location.search);
-    if (q.get("ejemplo") === "1" || q.get("ejemplo") === "2" || q.get("ejemplo") === "3") A.loadExample(+q.get("ejemplo"));
+    if (/^[1-7]$/.test(q.get("ejemplo") || "")) A.loadExample(+q.get("ejemplo"));
     $("fileinput").addEventListener("change", onFile);
     var pop = $("sym-popover");
     if (pop) pop.addEventListener("contextmenu", function (e) { e.preventDefault(); });

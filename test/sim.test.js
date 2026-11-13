@@ -863,5 +863,54 @@ test("coil voltage, 24 V AC transformer, currents and ratings, clock time switch
   for (let i = 0; i < 70; i++) sts.tick(dts, 0.1); eq(sts.st[tsw.id].on, false, "08:01 off");
 });
 
+test("fixed time step: flashers keep time whatever the frame rate", () => {
+  const run = (frameDt) => {
+    const d = SL.newDoc();
+    SL.makeComp(d, "FeedLN", 300, 120, 0, "");
+    const kt = SL.makeComp(d, "Flasher", 300, 150, 0, "-KT1", { time_base: 3, time_mult: 0.1 }); // 0.3 s
+    SL.addWire(d, [300, 210], [330, 210]); SL.addWire(d, [330, 150], [330, 210]);
+    const s = new SL.Sim(d); s.tick(d, 0);
+    eq(s.st[kt.id].energized, true, "flasher fed");
+    let toggles = 0, prev = s.st[kt.id].on;
+    for (let t = 0; t < 6 - 1e-9; t += frameDt) {
+      eq(s.advance(d, frameDt), null);
+      if (s.st[kt.id].on !== prev) { toggles++; prev = s.st[kt.id].on; }
+    }
+    return [toggles, Math.round(s.time * 100) / 100];
+  };
+  eq(run(1 / 60), [20, 6], "60 fps");
+  eq(run(1 / 30), [20, 6], "30 fps");
+  eq(run(0.25), [20, 6], "4 fps");
+  eq(run(0.003), [20, 6], "frames shorter than a step");
+});
+
+for (const [name, make] of [["GRAFCET", "exampleTrafficGrafcetDoc"], ["wired logic", "exampleTrafficWiredDoc"], ["relays", "exampleTrafficRelayDoc"]]) {
+  test("traffic light (" + name + "): green 5 s, amber 2 s, red 5 s, amber flashing at rest", () => {
+    const d = SL[make]();
+    const s = new SL.Sim(d);
+    const s1 = find(d, "PushNO", "-S1"), s0 = find(d, "PushNC", "-S0");
+    const lamps = ["-H1", "-H2", "-H3"].map((n) => find(d, "Lamp", n));
+    const light = () => lamps.map((id) => (s.st[id].energized ? 1 : 0)).join("");
+    eq(s.tick(d, 0), null);
+    // at rest: only the amber light, flashing every 0.5 s
+    const rest = new Set();
+    for (let i = 0; i < 150; i++) { eq(s.advance(d, 0.01), null); rest.add(light()); }
+    eq([...rest].sort(), ["000", "010"], "amber flashing at rest");
+    s.setActuator(d, s1, true); s.tick(d, 0); s.setActuator(d, s1, false); s.tick(d, 0);
+    // record the sequence of lights and how long each lasts
+    const seq = []; let cur = light(), since = s.time;
+    for (let i = 0; i < 2600; i++) {
+      eq(s.advance(d, 0.01), null);
+      const l = light();
+      if (l !== cur) { seq.push([cur, Math.round((s.time - since) * 10) / 10]); cur = l; since = s.time; }
+    }
+    eq(seq.slice(0, 6), [["100", 5], ["010", 2], ["001", 5], ["100", 5], ["010", 2], ["001", 5]], "cycle");
+    s.setActuator(d, s0, true); s.tick(d, 0); s.setActuator(d, s0, false); s.tick(d, 0);
+    const after = new Set();
+    for (let i = 0; i < 150; i++) { s.advance(d, 0.01); after.add(light()); }
+    eq([...after].sort(), ["000", "010"], "stop: back to amber flashing");
+  });
+}
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all passed");
