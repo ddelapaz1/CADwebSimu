@@ -6,7 +6,7 @@ const vm = require("vm");
 const ctx = { console };
 ctx.globalThis = ctx;
 vm.createContext(ctx);
-for (const f of ["model.js", "symbols.js", "sim.js", "render.js", "examples.js"]) {
+for (const f of ["model.js", "symbols.js", "sim.js", "render.js", "info.js", "examples.js"]) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8"), ctx, { filename: f });
 }
 const SL = ctx.SL;
@@ -781,6 +781,17 @@ test("current flow: from the source to the load and back on N", () => {
   const back = f.find((x) => x.from[0] === 330 && x.from[1] === 360);
   eq(!!back && back.to[1] === 150, true, "neutral: back to the feed");
   eq(f.length, 4, "every conductor of the loop carries current");
+});
+
+test("every element has its teaching notes", () => {
+  const missing = SL.KIND_LIST.filter((k) => !k.tool).filter((k) => {
+    const i = SL.kindInfo(k.id);
+    return !i || !i.what || !i.how || !i.sim || !i.specs.length;
+  }).map((k) => k.id);
+  eq(missing, [], "kinds without notes");
+  eq(SL.kindInfo("AuxNC").specs[0].indexOf("normalment tancat") > 0, true, "contact type added");
+  eq(SL.kindInfo("Auto3N").specs[0].indexOf("3 fases + neutre") > 0, true, "poles added");
+  eq(SL.kindInfo("Contactor3").specs[0], "Versió tripolar (3 pols).");
 });
 
 if (failed) { console.log(failed + " failed"); process.exit(1); }

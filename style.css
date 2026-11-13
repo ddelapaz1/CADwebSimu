@@ -617,3 +617,17 @@ html, body { background: var(--panel); color: var(--text); }
 #minimap { position: absolute; left: 10px; bottom: 10px; width: 180px; height: 128px; border-radius: 8px; border: 1px solid var(--border);
   box-shadow: var(--shadow); background: #fff; z-index: 5; cursor: pointer; }
 #minimap[hidden] { display: none; }
+
+/* "Més informació" in the properties card */
+#props { max-height: calc(100% - 20px); overflow: auto; }
+#props details.info { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+#props details.info summary { cursor: pointer; font-weight: 600; color: var(--accent); list-style: none; }
+#props details.info summary::-webkit-details-marker { display: none; }
+#props details.info summary::before { content: "▸ "; display: inline-block; transition: transform .15s; }
+#props details.info[open] summary::before { content: "▾ "; }
+#props details.info h4 { margin: 10px 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+#props details.info p { margin: 0; line-height: 1.45; }
+#props details.info ul { margin: 0; padding-left: 16px; line-height: 1.45; }
+#props details.info li { margin: 2px 0; }
+#props details.info p.sim { background: var(--btn-hover); border-radius: 6px; padding: 6px 8px; }
+#props.wide { width: 300px; }

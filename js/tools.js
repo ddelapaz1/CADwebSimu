@@ -509,6 +509,24 @@
       box.appendChild(el("label", { class: "chk" }, [cb, document.createTextNode("Rearmament automàtic")]));
     }
     box.appendChild(el("button", { text: "Més propietats…", on: { click: function () { A.openProps(c.id); } } }));
+    // "Més informació": what the element is, characteristics, how it works, how it is simulated
+    var inf = SL.kindInfo && SL.kindInfo(c.kind);
+    if (inf) {
+      var det = el("details", { class: "info" });
+      det.open = !!A.infoOpen;
+      box.classList.toggle("wide", det.open);
+      det.addEventListener("toggle", function () { A.infoOpen = det.open; box.classList.toggle("wide", det.open); });
+      det.appendChild(el("summary", { text: "Més informació" }));
+      det.appendChild(el("h4", { text: "Què és" }));
+      det.appendChild(el("p", { text: inf.what }));
+      if (inf.specs.length) {
+        det.appendChild(el("h4", { text: "Característiques" }));
+        det.appendChild(el("ul", {}, inf.specs.map(function (x) { return el("li", { text: x }); })));
+      }
+      if (inf.how) { det.appendChild(el("h4", { text: "Funcionament" })); det.appendChild(el("p", { text: inf.how })); }
+      if (inf.sim) { det.appendChild(el("h4", { text: "Al simulador" })); det.appendChild(el("p", { class: "sim", text: inf.sim })); }
+      box.appendChild(det);
+    }
   }
 
   // ================================================================ minimap
